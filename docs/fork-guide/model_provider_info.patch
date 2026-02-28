@@ -1,0 +1,84 @@
+================================================================================
+Conceptual patch for: codex-rs/core/src/model_provider_info.rs
+================================================================================
+
+This is a conceptual patch showing what to add/change. Apply manually or adapt
+to the exact file state in your fork.
+
+--- a/codex-rs/core/src/model_provider_info.rs
++++ b/codex-rs/core/src/model_provider_info.rs
+@@ (in the imports section, add HashMap if not already imported)
++use std::collections::HashMap;
+
+@@ (in built_in_model_providers(), add to the vec of providers)
+
+ /// Returns the list of built-in model providers.
+ pub fn built_in_model_providers() -> Vec<(&'static str, ModelProviderInfo)> {
+     vec![
+         ("openai", create_openai_provider()),
+         ("ollama", create_ollama_provider()),
+         ("lmstudio", create_lmstudio_provider()),
++        ("copilot", create_copilot_provider()),
+     ]
+ }
+
+@@ (add this new function alongside the other create_*_provider functions)
+
++fn create_copilot_provider() -> ModelProviderInfo {
++    ModelProviderInfo {
++        name: "GitHub Copilot".into(),
++        base_url: Some("https://api.githubcopilot.com".into()),
++        env_key: Some("GH_COPILOT_TOKEN".into()),
++        env_key_instructions: Some(
++            "Set GH_COPILOT_TOKEN to your GitHub OAuth token.\n\
++             Find it in ~/.config/github-copilot/hosts.json under github.com.oauth_token\n\
++             Or run: gh auth token"
++                .into(),
++        ),
++        experimental_bearer_token: None,
++        wire_api: WireApi::Responses,
++        query_params: None,
++        http_headers: Some(HashMap::from([
++            (
++                "Editor-Version".to_string(),
++                format!("codex/{}", env!("CARGO_PKG_VERSION")),
++            ),
++            (
++                "Copilot-Integration-Id".to_string(),
++                "codex-cli".to_string(),
++            ),
++        ])),
++        env_http_headers: None,
++        request_max_retries: None,
++        stream_max_retries: None,
++        stream_idle_timeout_ms: None,
++        requires_openai_auth: false,
++        supports_websockets: false,
++    }
++}
+
+================================================================================
+Notes
+================================================================================
+
+1. The `WireApi::Responses` variant tells Codex to use the Responses API wire
+   format (POST /responses with streaming). This is the same format as OpenAI's
+   API — GitHub Copilot supports it natively at /responses.
+
+2. `requires_openai_auth: false` — we don't use OpenAI's auth flow; we use a
+   GitHub OAuth token via GH_COPILOT_TOKEN.
+
+3. `supports_websockets: false` — Copilot's API uses SSE streaming, not
+   WebSockets.
+
+4. The `Editor-Version` and `Copilot-Integration-Id` headers are required by
+   the Copilot API. Without them, requests may be rejected or treated
+   differently for telemetry/rate-limiting purposes.
+
+5. The `env_key` is set to `GH_COPILOT_TOKEN`. Codex will read the token from
+   this environment variable and set it as the Bearer token in the
+   Authorization header automatically.
+
+6. If you want automatic token discovery (from hosts.json, gh CLI, etc.),
+   see copilot_auth.rs — you'd integrate it into the provider initialization
+   or config resolution path.

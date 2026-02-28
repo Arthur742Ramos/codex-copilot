@@ -1,60 +1,92 @@
-<p align="center"><code>npm i -g @openai/codex</code><br />or <code>brew install --cask codex</code></p>
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# codex-copilot
 
----
+Use [OpenAI Codex CLI](https://github.com/openai/codex) with your GitHub Copilot subscription — no OpenAI API key needed.
 
-## Quickstart
+## Key Discovery
 
-### Installing and running Codex CLI
+GitHub Copilot **supports the Responses API** at `https://api.githubcopilot.com/responses` — the same wire protocol Codex uses. Models with `/responses` support: `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, `gpt-5.2`.
 
-Install globally with your preferred package manager:
+## ⚠️ Important: Client Identity Enforcement
 
-```shell
-# Install using npm
-npm install -g @openai/codex
+The Copilot API **rejects requests from unrecognized clients**. A raw `gh auth token` (gho\_) can query `/models` but gets **403 Forbidden** on `/responses` and `/chat/completions`. The API enforces a client handshake that only recognized Copilot integrations (VS Code, JetBrains, the `copilot` CLI) can complete.
+
+This means **a simple config-only approach doesn't work** — you need either a proxy that handles the handshake, or a Codex fork that implements the full Copilot auth dance.
+
+## Quick Start: Proxy Approach (Recommended)
+
+Use [ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) (2.6k ⭐) as a local proxy that handles the Copilot client handshake:
+
+```bash
+# 1. Install and start the proxy
+npx copilot-api
+
+# 2. Configure Codex CLI to use it (proxy runs on port 4141)
+cat >> ~/.codex/config.toml << 'EOF'
+model = "gpt-5.1-codex"
+model_provider = "copilot"
+
+[model_providers.copilot]
+name = "GitHub Copilot (via proxy)"
+base_url = "http://127.0.0.1:4141"
+wire_api = "responses"
+EOF
+
+# 3. Use Codex as normal
+codex "explain this codebase"
 ```
 
-```shell
-# Install using Homebrew
-brew install --cask codex
+> **Note:** Only models with `/responses` support work with Codex: `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, `gpt-5.2`. Claude and Gemini models only support `/chat/completions` on Copilot.
+
+### Setup script
+
+The included setup script validates your Copilot access and generates the config:
+
+```bash
+./scripts/codex-copilot-setup.sh
 ```
 
-Then simply run `codex` to get started.
+## Fork Approach (Built-in Provider)
 
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
+For a first-class experience with automatic token discovery, you can fork openai/codex and add a built-in `copilot` provider. See [`docs/fork-guide/`](docs/fork-guide/) for:
 
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
+- **[README.md](docs/fork-guide/README.md)** — Step-by-step fork & build guide
+- **[model_provider_info.patch](docs/fork-guide/model_provider_info.patch)** — Rust code to add `create_copilot_provider()`
+- **[copilot_auth.rs](docs/fork-guide/copilot_auth.rs)** — Token discovery module (env var → hosts.json → apps.json → gh CLI)
+- **[integration_notes.md](docs/fork-guide/integration_notes.md)** — API details, rate limiting, premium request tracking, enterprise support
 
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
+## Available Models
 
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
+Query what's available on your subscription:
 
-</details>
+```bash
+curl -s https://api.githubcopilot.com/models \
+  -H "Authorization: Bearer $(gh auth token)" \
+  -H "x-github-api-version: 2025-05-01" \
+  | jq '.[].id'
+```
 
-### Using Codex with your ChatGPT plan
+Common models: `gpt-4.1`, `gpt-4o`, `o4-mini`, `o3`, `claude-sonnet-4`, `gemini-2.5-pro`
 
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Team, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
+## How It Works
 
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
+```
+┌─────────────┐                      ┌──────────────┐     Copilot Auth      ┌──────────────────────────┐
+│  Codex CLI   │   Responses API     │  copilot-api  │  ──────────────────▶  │  api.githubcopilot.com   │
+│              │ ────────────────▶   │  (proxy)      │   POST /responses    │     (Responses API)      │
+│  localhost   │  POST /responses    │  port 4141    │ ◀──────────────────   │                          │
+│  :4141       │ ◀────────────────   │  handles auth │   SSE streaming      │  Routes to: GPT-5.x,     │
+│              │  SSE streaming      │  + handshake  │                      │  GPT-4o, etc.            │
+└─────────────┘                      └──────────────┘                      └──────────────────────────┘
+```
 
-## Docs
+The proxy handles the Copilot client handshake (client identity, token exchange) that raw HTTP calls can't pass. Codex CLI sees a standard Responses API endpoint.
 
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
+## Related
 
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+- [openai/codex#3609](https://github.com/openai/codex/issues/3609) — Feature request for built-in Copilot provider (51 👍)
+- [ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) — Alternative proxy approach (Chat Completions only)
+- [Zed's Copilot implementation](https://github.com/zed-industries/zed/tree/main/crates/copilot_chat/src) — Reference for auth flow
+
+## License
+
+MIT
