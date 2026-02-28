@@ -4,66 +4,45 @@ Use [OpenAI Codex CLI](https://github.com/openai/codex) with your GitHub Copilot
 
 ## Key Discovery
 
-GitHub Copilot **already supports the Responses API** at `https://api.githubcopilot.com/responses` — the same wire protocol Codex uses. No translation layer needed. Just point Codex at Copilot's endpoint with your GitHub token.
+GitHub Copilot **supports the Responses API** at `https://api.githubcopilot.com/responses` — the same wire protocol Codex uses. Models with `/responses` support: `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, `gpt-5.2`.
 
-## Quick Start (No Fork Required)
+## ⚠️ Important: Client Identity Enforcement
 
-The fastest way — works with stock Codex CLI today:
+The Copilot API **rejects requests from unrecognized clients**. A raw `gh auth token` (gho\_) can query `/models` but gets **403 Forbidden** on `/responses` and `/chat/completions`. The API enforces a client handshake that only recognized Copilot integrations (VS Code, JetBrains, the `copilot` CLI) can complete.
+
+This means **a simple config-only approach doesn't work** — you need either a proxy that handles the handshake, or a Codex fork that implements the full Copilot auth dance.
+
+## Quick Start: Proxy Approach (Recommended)
+
+Use [ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) (2.6k ⭐) as a local proxy that handles the Copilot client handshake:
 
 ```bash
-# 1. Run the setup script
-./scripts/codex-copilot-setup.sh
+# 1. Install and start the proxy
+npx copilot-api
 
-# 2. Add the token export to your shell profile (~/.bashrc, ~/.zshrc, etc.)
-export GH_COPILOT_TOKEN=$(cat ~/.config/github-copilot/hosts.json 2>/dev/null \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('github.com',{}).get('oauth_token',''))" 2>/dev/null)
+# 2. Configure Codex CLI to use it (proxy runs on port 4141)
+cat >> ~/.codex/config.toml << 'EOF'
+model = "gpt-5.1-codex"
+model_provider = "copilot"
+
+[model_providers.copilot]
+name = "GitHub Copilot (via proxy)"
+base_url = "http://127.0.0.1:4141"
+wire_api = "responses"
+EOF
 
 # 3. Use Codex as normal
 codex "explain this codebase"
 ```
 
-### What the setup script does
+> **Note:** Only models with `/responses` support work with Codex: `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, `gpt-5.2`. Claude and Gemini models only support `/chat/completions` on Copilot.
 
-1. **Finds your GitHub token** from `~/.config/github-copilot/hosts.json`, `apps.json`, `gh auth token`, or `$GH_COPILOT_TOKEN`
-2. **Validates Copilot access** via the token exchange endpoint
-3. **Generates `~/.codex/config.toml`** with the Copilot provider:
+### Setup script
 
-```toml
-model = "gpt-4.1"
-model_provider = "copilot"
-
-[model_providers.copilot]
-name = "GitHub Copilot"
-base_url = "https://api.githubcopilot.com"
-env_key = "GH_COPILOT_TOKEN"
-wire_api = "responses"
-http_headers = { "Editor-Version" = "codex-cli/1.0", "Copilot-Integration-Id" = "codex-cli" }
-```
-
-4. **Lists available models** from the Copilot API
-
-### Manual config (even quicker)
-
-If you just want to configure it yourself:
+The included setup script validates your Copilot access and generates the config:
 
 ```bash
-# Get your token
-export GH_COPILOT_TOKEN=$(gh auth token)
-
-# Add to ~/.codex/config.toml
-cat >> ~/.codex/config.toml << 'EOF'
-model_provider = "copilot"
-
-[model_providers.copilot]
-name = "GitHub Copilot"
-base_url = "https://api.githubcopilot.com"
-env_key = "GH_COPILOT_TOKEN"
-wire_api = "responses"
-http_headers = { "Editor-Version" = "codex-cli/1.0", "Copilot-Integration-Id" = "codex-cli" }
-EOF
-
-# Run codex
-codex "hello world"
+./scripts/codex-copilot-setup.sh
 ```
 
 ## Fork Approach (Built-in Provider)
@@ -91,16 +70,16 @@ Common models: `gpt-4.1`, `gpt-4o`, `o4-mini`, `o3`, `claude-sonnet-4`, `gemini-
 ## How It Works
 
 ```
-┌─────────────┐     Responses API      ┌──────────────────────────┐
-│  Codex CLI   │ ────────────────────▶  │  api.githubcopilot.com   │
-│              │  POST /responses       │     (Responses API)      │
-│  GH_COPILOT  │  Bearer: gho_xxx      │                          │
-│  _TOKEN      │ ◀────────────────────  │  Routes to: GPT, Claude, │
-│              │  SSE streaming         │  Gemini, etc.            │
-└─────────────┘                        └──────────────────────────┘
+┌─────────────┐                      ┌──────────────┐     Copilot Auth      ┌──────────────────────────┐
+│  Codex CLI   │   Responses API     │  copilot-api  │  ──────────────────▶  │  api.githubcopilot.com   │
+│              │ ────────────────▶   │  (proxy)      │   POST /responses    │     (Responses API)      │
+│  localhost   │  POST /responses    │  port 4141    │ ◀──────────────────   │                          │
+│  :4141       │ ◀────────────────   │  handles auth │   SSE streaming      │  Routes to: GPT-5.x,     │
+│              │  SSE streaming      │  + handshake  │                      │  GPT-4o, etc.            │
+└─────────────┘                      └──────────────┘                      └──────────────────────────┘
 ```
 
-GitHub Copilot's API proxies to the same underlying models (GPT-4.1, Claude, Gemini, etc.) and speaks the exact same Responses API wire format as `api.openai.com/v1/responses`. Codex CLI doesn't know the difference.
+The proxy handles the Copilot client handshake (client identity, token exchange) that raw HTTP calls can't pass. Codex CLI sees a standard Responses API endpoint.
 
 ## Related
 
