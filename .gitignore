@@ -1,0 +1,18 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Rust build artifacts (if forking codex)
+target/
+*.rs.bk
+
+# Environment
+.env
+.env.local
