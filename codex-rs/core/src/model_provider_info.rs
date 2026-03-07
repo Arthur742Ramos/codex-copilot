@@ -111,6 +111,11 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the Responses API WebSocket transport.
     #[serde(default)]
     pub supports_websockets: bool,
+
+    /// Whether this provider exchanges a GitHub OAuth token for a short-lived
+    /// Copilot session token before each request.
+    #[serde(default)]
+    pub copilot_token_exchange: bool,
 }
 
 impl ModelProviderInfo {
@@ -253,11 +258,51 @@ impl ModelProviderInfo {
             stream_idle_timeout_ms: None,
             requires_openai_auth: true,
             supports_websockets: true,
+            copilot_token_exchange: false,
         }
     }
 
     pub fn is_openai(&self) -> bool {
         self.name == OPENAI_PROVIDER_NAME
+    }
+
+    pub fn create_copilot_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: "GitHub Copilot".into(),
+            base_url: Some("https://api.githubcopilot.com".into()),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: Some(HashMap::from([
+                ("Editor-Version".to_string(), "vscode/1.96.0".to_string()),
+                (
+                    "Editor-Plugin-Version".to_string(),
+                    "copilot-chat/0.26.7".to_string(),
+                ),
+                (
+                    "Copilot-Integration-Id".to_string(),
+                    "vscode-chat".to_string(),
+                ),
+                (
+                    "User-Agent".to_string(),
+                    "GitHubCopilotChat/0.26.7".to_string(),
+                ),
+                (
+                    "OpenAI-Intent".to_string(),
+                    "conversation-panel".to_string(),
+                ),
+                ("X-GitHub-Api-Version".to_string(), "2025-04-01".to_string()),
+            ])),
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+            copilot_token_exchange: true,
+        }
     }
 }
 
@@ -271,12 +316,11 @@ pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
 pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
 
-    // We do not want to be in the business of adjucating which third-party
-    // providers are bundled with Codex CLI, so we only include the OpenAI and
-    // open source ("oss") providers by default. Users are encouraged to add to
-    // `model_providers` in config.toml to add their own providers.
+    // This fork keeps the upstream OpenAI and OSS defaults and adds a built-in
+    // GitHub Copilot provider.
     [
         ("openai", P::create_openai_provider()),
+        ("copilot", P::create_copilot_provider()),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
@@ -326,6 +370,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         stream_idle_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        copilot_token_exchange: false,
     }
 }
 
@@ -355,6 +400,7 @@ base_url = "http://localhost:11434/v1"
             stream_idle_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            copilot_token_exchange: false,
         };
 
         let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -386,6 +432,7 @@ query_params = { api-version = "2025-04-01-preview" }
             stream_idle_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            copilot_token_exchange: false,
         };
 
         let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -420,6 +467,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
             stream_idle_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            copilot_token_exchange: false,
         };
 
         let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -437,5 +485,12 @@ wire_api = "chat"
 
         let err = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap_err();
         assert!(err.to_string().contains(CHAT_WIRE_API_REMOVED_ERROR));
+    }
+
+    #[test]
+    fn test_built_in_providers_include_copilot() {
+        let providers = built_in_model_providers();
+        assert!(providers.contains_key("copilot"));
+        assert!(providers["copilot"].copilot_token_exchange);
     }
 }

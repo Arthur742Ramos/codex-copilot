@@ -240,6 +240,13 @@ pub(crate) fn auth_provider_from_auth(
     auth: Option<CodexAuth>,
     provider: &ModelProviderInfo,
 ) -> crate::error::Result<CoreAuthProvider> {
+    if provider.copilot_token_exchange {
+        return Ok(CoreAuthProvider {
+            token: Some(crate::copilot_auth::get_copilot_token()?),
+            account_id: None,
+        });
+    }
+
     if let Some(api_key) = provider.api_key()? {
         return Ok(CoreAuthProvider {
             token: Some(api_key),

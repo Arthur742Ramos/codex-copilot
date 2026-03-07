@@ -29,6 +29,7 @@ pub mod config_loader;
 pub mod connectors;
 mod context_manager;
 mod contextual_user_message;
+mod copilot_auth;
 pub mod custom_prompts;
 pub mod env;
 mod environment_context;
