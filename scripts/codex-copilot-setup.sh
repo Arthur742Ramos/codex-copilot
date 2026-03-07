@@ -135,8 +135,8 @@ confirm() {
     warn "$prompt -> non-interactive shell; keeping current value"
     return 1
   fi
-  read -r -p "$prompt [y/N]: " ans
-  [[ "$ans" =~ ^[Yy]$ ]]
+  read -r -p "$prompt [y/N]: " reply
+  [[ "$reply" =~ ^[Yy]$ ]]
 }
 
 update_config() {

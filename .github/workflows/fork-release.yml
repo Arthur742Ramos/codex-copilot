@@ -58,16 +58,16 @@ jobs:
 
           case "${{ inputs.target }}" in
             aarch64-apple-darwin)
-              json='[{"runner":"macos-15-xlarge","target":"aarch64-apple-darwin"}]'
+              json='[{"runner":"macos-14","target":"aarch64-apple-darwin"}]'
               ;;
             x86_64-apple-darwin)
-              json='[{"runner":"macos-15-xlarge","target":"x86_64-apple-darwin"}]'
+              json='[{"runner":"macos-13","target":"x86_64-apple-darwin"}]'
               ;;
             x86_64-unknown-linux-gnu)
               json='[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"}]'
               ;;
             all)
-              json='[{"runner":"macos-15-xlarge","target":"aarch64-apple-darwin"},{"runner":"macos-15-xlarge","target":"x86_64-apple-darwin"},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"}]'
+              json='[{"runner":"macos-14","target":"aarch64-apple-darwin"},{"runner":"macos-13","target":"x86_64-apple-darwin"},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"}]'
               ;;
             *)
               echo "unsupported target: ${{ inputs.target }}" >&2
