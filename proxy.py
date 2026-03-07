@@ -94,7 +94,7 @@ class TokenManager:
                     refresh_in,
                 )
                 return self.copilot_token
-            except HTTPError as e:
+            except UrllibHTTPError as e:
                 body = e.read().decode()
                 log.error("Token exchange failed (%d): %s", e.code, body)
                 raise

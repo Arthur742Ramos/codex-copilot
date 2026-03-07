@@ -3103,6 +3103,37 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
 }
 
 #[test]
+fn user_defined_provider_replaces_built_in_provider_with_same_key() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cfg: ConfigToml = toml::from_str(
+        r#"
+model_provider = "copilot"
+
+[model_providers.copilot]
+name = "GitHub Copilot Proxy"
+base_url = "http://127.0.0.1:4141"
+"#,
+    )
+    .expect("TOML deserialization should succeed");
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.path().to_path_buf(),
+    )?;
+
+    assert_eq!(config.model_provider_id, "copilot");
+    assert_eq!(config.model_provider.name, "GitHub Copilot Proxy");
+    assert_eq!(
+        config.model_provider.base_url.as_deref(),
+        Some("http://127.0.0.1:4141")
+    );
+    assert!(!config.model_provider.copilot_token_exchange);
+
+    Ok(())
+}
+
+#[test]
 fn metrics_exporter_defaults_to_statsig_when_missing() -> std::io::Result<()> {
     let fixture = create_test_fixture()?;
 

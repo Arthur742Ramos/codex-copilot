@@ -28,7 +28,7 @@ struct CachedCopilotToken {
     expires_at: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 struct CopilotTokenResponse {
     token: String,
     expires_at: i64,
@@ -69,6 +69,7 @@ fn discover_github_token() -> Option<String> {
 
     read_token_from_config("hosts.json")
         .or_else(|| read_token_from_config("apps.json"))
+        .or_else(read_token_from_device_flow_cache)
         .or_else(read_token_from_gh_cli)
 }
 
@@ -109,6 +110,27 @@ fn copilot_config_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Read a GitHub token cached by the Copilot proxy device flow
+/// (`~/.config/codex-copilot/token.json`).
+fn read_token_from_device_flow_cache() -> Option<String> {
+    let xdg_config = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("~"))
+                .join(".config")
+        });
+    let path = xdg_config.join("codex-copilot").join("token.json");
+    let content = std::fs::read_to_string(path).ok()?;
+    let data: HashMap<String, String> = serde_json::from_str(&content).ok()?;
+    let token = data.get("github_token")?;
+    if token.trim().is_empty() {
+        None
+    } else {
+        Some(token.clone())
+    }
+}
+
 fn read_token_from_gh_cli() -> Option<String> {
     let output = Command::new("gh").args(["auth", "token"]).output().ok()?;
     if !output.status.success() {
@@ -120,12 +142,30 @@ fn read_token_from_gh_cli() -> Option<String> {
 }
 
 fn exchange_github_token(github_token: &str) -> crate::error::Result<CopilotTokenResponse> {
+    exchange_github_token_with_endpoint(github_token, COPILOT_TOKEN_ENDPOINT)
+}
+
+fn exchange_github_token_with_endpoint(
+    github_token: &str,
+    endpoint: &str,
+) -> crate::error::Result<CopilotTokenResponse> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::block_in_place(|| exchange_github_token_inner(github_token, endpoint))
+    } else {
+        exchange_github_token_inner(github_token, endpoint)
+    }
+}
+
+fn exchange_github_token_inner(
+    github_token: &str,
+    endpoint: &str,
+) -> crate::error::Result<CopilotTokenResponse> {
     let client = Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(connection_failed)?;
     let response = client
-        .get(COPILOT_TOKEN_ENDPOINT)
+        .get(endpoint)
         .header("Authorization", format!("token {github_token}"))
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
@@ -142,7 +182,7 @@ fn exchange_github_token(github_token: &str) -> crate::error::Result<CopilotToke
         return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
             status,
             body,
-            url: Some(COPILOT_TOKEN_ENDPOINT.to_string()),
+            url: Some(endpoint.to_string()),
             cf_ray: None,
             request_id: None,
         }));
@@ -181,9 +221,15 @@ fn unix_timestamp_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
     use serial_test::serial;
     use std::io::Write;
     use tempfile::TempDir;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
 
     #[test]
     #[serial]
@@ -228,5 +274,32 @@ mod tests {
         unsafe {
             std::env::remove_var("XDG_CONFIG_HOME");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exchange_github_token_in_async_context_does_not_panic() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/copilot_internal/v2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "token": "copilot-session-token",
+                "expires_at": 1234,
+            })))
+            .mount(&server)
+            .await;
+
+        let response = exchange_github_token_with_endpoint(
+            "gho_test_token",
+            &format!("{}/copilot_internal/v2/token", server.uri()),
+        )
+        .expect("token exchange should succeed");
+
+        assert_eq!(
+            response,
+            CopilotTokenResponse {
+                token: "copilot-session-token".to_string(),
+                expires_at: 1234,
+            }
+        );
     }
 }
