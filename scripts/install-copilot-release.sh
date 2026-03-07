@@ -88,6 +88,9 @@ resolve_target() {
         x86_64|amd64)
           printf 'x86_64-unknown-linux-gnu\n'
           ;;
+        aarch64|arm64)
+          printf 'aarch64-unknown-linux-gnu\n'
+          ;;
         *)
           echo "Unsupported Linux architecture: $arch" >&2
           exit 1

@@ -49,28 +49,34 @@ The included setup script validates your Copilot access and generates the config
 
 ## GitHub Releases
 
-If you do not want to compile locally, use the manual GitHub Actions release
-workflow in this fork. It builds the binary on GitHub and publishes a release
-asset you can install directly.
+Pre-built binaries are available for **macOS** (ARM, Intel), **Linux** (x86_64, ARM64),
+and **Windows** (x86_64). No compilation needed.
 
-For this machine, the target is `aarch64-apple-darwin`.
-
-Fast path:
+### Install from a release
 
 ```bash
+# Automatic — detects your platform and installs the latest release
 ./scripts/install-copilot-release.sh latest
 ```
 
-Or use the manual steps:
+### Trigger a new release
 
 ```bash
-# 1. Build and publish a release from this fork.
+# Build all platforms (macOS, Linux, Windows)
+gh workflow run fork-release.yml -f version=0.1.0
+
+# Or build a single target
 gh workflow run fork-release.yml -f version=0.1.0 -f target=aarch64-apple-darwin
+```
 
-# 2. Download the release asset after the workflow completes.
+Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `all` (default).
+
+### Manual install
+
+```bash
+# Download and extract the binary for your platform
 gh release download copilot-v0.1.0 -p 'codex-aarch64-apple-darwin.tar.gz' -D /tmp/codex-release
-
-# 3. Install just the compiled binary.
 tar -xzf /tmp/codex-release/codex-aarch64-apple-darwin.tar.gz -C /tmp/codex-release
 install -d ~/.local/codex-copilot/bin
 install -m 755 /tmp/codex-release/codex ~/.local/codex-copilot/bin/codex

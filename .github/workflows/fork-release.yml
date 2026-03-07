@@ -10,17 +10,19 @@ on:
       target:
         description: Target platform to build
         required: true
-        default: aarch64-apple-darwin
+        default: all
         type: choice
         options:
           - aarch64-apple-darwin
           - x86_64-apple-darwin
           - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-msvc
           - all
       make_latest:
         description: Mark the GitHub release as latest
         required: true
-        default: false
+        default: true
         type: boolean
 
 concurrency:
@@ -33,6 +35,7 @@ jobs:
     outputs:
       release_tag: ${{ steps.meta.outputs.release_tag }}
       release_name: ${{ steps.meta.outputs.release_name }}
+      version: ${{ steps.meta.outputs.version }}
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Validate release metadata
@@ -49,6 +52,7 @@ jobs:
 
           echo "release_tag=copilot-v${version}" >> "$GITHUB_OUTPUT"
           echo "release_name=codex-copilot ${version}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Build matrix
         id: matrix
@@ -58,16 +62,28 @@ jobs:
 
           case "${{ inputs.target }}" in
             aarch64-apple-darwin)
-              json='[{"runner":"macos-14","target":"aarch64-apple-darwin"}]'
+              json='[{"runner":"macos-14","target":"aarch64-apple-darwin","ext":""}]'
               ;;
             x86_64-apple-darwin)
-              json='[{"runner":"macos-13","target":"x86_64-apple-darwin"}]'
+              json='[{"runner":"macos-13","target":"x86_64-apple-darwin","ext":""}]'
               ;;
             x86_64-unknown-linux-gnu)
-              json='[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"}]'
+              json='[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","ext":""}]'
+              ;;
+            aarch64-unknown-linux-gnu)
+              json='[{"runner":"ubuntu-24.04","target":"aarch64-unknown-linux-gnu","ext":"","cross":true}]'
+              ;;
+            x86_64-pc-windows-msvc)
+              json='[{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}]'
               ;;
             all)
-              json='[{"runner":"macos-14","target":"aarch64-apple-darwin"},{"runner":"macos-13","target":"x86_64-apple-darwin"},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"}]'
+              json='[
+                {"runner":"macos-14","target":"aarch64-apple-darwin","ext":""},
+                {"runner":"macos-13","target":"x86_64-apple-darwin","ext":""},
+                {"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","ext":""},
+                {"runner":"ubuntu-24.04","target":"aarch64-unknown-linux-gnu","ext":"","cross":true},
+                {"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}
+              ]'
               ;;
             *)
               echo "unsupported target: ${{ inputs.target }}" >&2
@@ -97,13 +113,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Stamp version in Cargo.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          sed -i.bak "s/^version = \"0\.0\.0\"/version = \"${version}\"/" Cargo.toml
+          rm -f Cargo.toml.bak
+          echo "Workspace version set to ${version}"
+          grep '^version' Cargo.toml
+
       - name: Install Linux build dependencies
-        if: ${{ runner.os == 'Linux' }}
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
+
+      - name: Install cross-compilation toolchain (ARM Linux)
+        if: matrix.cross
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
@@ -111,9 +147,10 @@ jobs:
 
       - name: Build release binary
         shell: bash
-        run: cargo build --locked --release --target ${{ matrix.target }} --bin codex
+        run: cargo build --release --target ${{ matrix.target }} --bin codex
 
-      - name: Package release asset
+      - name: Package release asset (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -125,6 +162,19 @@ jobs:
           tar -C "$dest" -czf "$dest/codex-${{ matrix.target }}.tar.gz" codex
           shasum -a 256 "$dest/codex-${{ matrix.target }}.tar.gz" > "$dest/codex-${{ matrix.target }}.sha256"
           rm "$dest/codex"
+
+      - name: Package release asset (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dest = "$env:RUNNER_TEMP\dist\${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+          Copy-Item "target\${{ matrix.target }}\release\codex.exe" "$dest\codex.exe"
+          Compress-Archive -Path "$dest\codex.exe" -DestinationPath "$dest\codex-${{ matrix.target }}.zip"
+          $hash = (Get-FileHash "$dest\codex-${{ matrix.target }}.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  codex-${{ matrix.target }}.zip" | Out-File -Encoding ascii "$dest\codex-${{ matrix.target }}.sha256"
+          Remove-Item "$dest\codex.exe"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -141,11 +191,20 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/install-copilot-release.sh
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           pattern: release-*
           merge-multiple: true
+
+      - name: Stage install script
+        shell: bash
+        run: cp scripts/install-copilot-release.sh dist/install.sh
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -156,3 +215,13 @@ jobs:
           generate_release_notes: true
           make_latest: ${{ inputs.make_latest && 'true' || 'false' }}
           files: dist/*
+          body: |
+            ## Install
+
+            **macOS / Linux (requires [GitHub CLI](https://cli.github.com/)):**
+            ```bash
+            gh release download ${{ needs.prepare.outputs.release_tag }} \
+              --repo ${{ github.repository }} -p install.sh -D /tmp && bash /tmp/install.sh
+            ```
+
+            Or download the binary for your platform from the assets below and extract it manually.
