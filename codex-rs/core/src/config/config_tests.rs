@@ -2525,7 +2525,7 @@ struct PrecedenceTestFixture {
     codex_home: TempDir,
     cfg: ConfigToml,
     model_provider_map: HashMap<String, ModelProviderInfo>,
-    openai_provider: ModelProviderInfo,
+    copilot_provider: ModelProviderInfo,
     openai_custom_provider: ModelProviderInfo,
 }
 
@@ -2895,7 +2895,7 @@ stream_idle_timeout_ms = 300000    # 5m idle timeout
 
 [profiles.o3]
 model = "o3"
-model_provider = "openai"
+model_provider = "copilot"
 approval_policy = "never"
 model_reasoning_effort = "high"
 model_reasoning_summary = "detailed"
@@ -2906,7 +2906,7 @@ model_provider = "openai-custom"
 
 [profiles.zdr]
 model = "o3"
-model_provider = "openai"
+model_provider = "copilot"
 approval_policy = "on-failure"
 
 [profiles.zdr.analytics]
@@ -2914,7 +2914,7 @@ enabled = false
 
 [profiles.gpt5]
 model = "gpt-5.1"
-model_provider = "openai"
+model_provider = "copilot"
 approval_policy = "on-failure"
 model_reasoning_effort = "high"
 model_reasoning_summary = "detailed"
@@ -2956,9 +2956,9 @@ model_verbosity = "high"
         model_provider_map
     };
 
-    let openai_provider = model_provider_map
-        .get("openai")
-        .expect("openai provider should exist")
+    let copilot_provider = model_provider_map
+        .get("copilot")
+        .expect("copilot provider should exist")
         .clone();
 
     Ok(PrecedenceTestFixture {
@@ -2966,7 +2966,7 @@ model_verbosity = "high"
         codex_home: codex_home_temp_dir,
         cfg,
         model_provider_map,
-        openai_provider,
+        copilot_provider,
         openai_custom_provider,
     })
 }
@@ -2978,8 +2978,7 @@ model_verbosity = "high"
 /// 2. as part of a profile, where the `--profile` is specified via a CLI
 ///    (or in the config file itself)
 /// 3. as an entry in `config.toml`, e.g. `model = "o3"`
-/// 4. the default value for a required field defined in code, e.g.,
-///    `crate::flags::OPENAI_DEFAULT_MODEL`
+/// 4. the default value for a required field defined in code.
 ///
 /// Note that profiles are the recommended way to specify a group of
 /// configuration options together.
@@ -3004,8 +3003,8 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             model_context_window: None,
             model_auto_compact_token_limit: None,
             service_tier: None,
-            model_provider_id: "openai".to_string(),
-            model_provider: fixture.openai_provider.clone(),
+            model_provider_id: "copilot".to_string(),
+            model_provider: fixture.copilot_provider.clone(),
             permissions: Permissions {
                 approval_policy: Constrained::allow_any(AskForApproval::Never),
                 sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
@@ -3303,8 +3302,8 @@ fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         model_context_window: None,
         model_auto_compact_token_limit: None,
         service_tier: None,
-        model_provider_id: "openai".to_string(),
-        model_provider: fixture.openai_provider.clone(),
+        model_provider_id: "copilot".to_string(),
+        model_provider: fixture.copilot_provider.clone(),
         permissions: Permissions {
             approval_policy: Constrained::allow_any(AskForApproval::OnFailure),
             sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
@@ -3422,8 +3421,8 @@ fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         model_context_window: None,
         model_auto_compact_token_limit: None,
         service_tier: None,
-        model_provider_id: "openai".to_string(),
-        model_provider: fixture.openai_provider.clone(),
+        model_provider_id: "copilot".to_string(),
+        model_provider: fixture.copilot_provider.clone(),
         permissions: Permissions {
             approval_policy: Constrained::allow_any(AskForApproval::OnFailure),
             sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),

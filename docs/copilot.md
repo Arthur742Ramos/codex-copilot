@@ -16,10 +16,10 @@ This fork carries the latest upstream Codex tree and adds a built-in
 
 ## Basic usage
 
-Set your provider and model in `~/.codex/config.toml`:
+Copilot is the built-in default provider in this fork, so you only need to
+set a model if you want to pin one:
 
 ```toml
-model_provider = "copilot"
 model = "gpt-5.2-codex"
 ```
 

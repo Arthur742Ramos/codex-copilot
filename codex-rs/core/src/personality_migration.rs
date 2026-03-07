@@ -44,7 +44,7 @@ pub async fn maybe_migrate_personality(
     let model_provider_id = config_profile
         .model_provider
         .or_else(|| config_toml.model_provider.clone())
-        .unwrap_or_else(|| "openai".to_string());
+        .unwrap_or_else(|| "copilot".to_string());
 
     if !has_recorded_sessions(codex_home, model_provider_id.as_str()).await? {
         create_marker(&marker_path).await?;

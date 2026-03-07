@@ -57,8 +57,12 @@ async fn resume_startup_does_not_consume_model_availability_nux_count() -> Resul
     let catalog_display = custom_catalog_path.display();
     let config_contents = format!(
         r#"model = "{model_slug}"
-model_provider = "openai"
 model_catalog_json = "{catalog_display}"
+
+[model_providers.copilot]
+name = "GitHub Copilot Fixture"
+base_url = "http://unused.local"
+experimental_bearer_token = "dummy"
 
 [projects."{repo_root_display}"]
 trust_level = "trusted"
@@ -90,9 +94,7 @@ trust_level = "trusted"
         .arg(&repo_root)
         .arg("seed session for resume")
         .env("CODEX_HOME", codex_home.path())
-        .env("OPENAI_API_KEY", "dummy")
         .env("CODEX_RS_SSE_FIXTURE", fixture_path)
-        .env("OPENAI_BASE_URL", "http://unused.local")
         .output()
         .context("failed to execute codex exec")?;
     anyhow::ensure!(
@@ -106,7 +108,6 @@ trust_level = "trusted"
         "CODEX_HOME".to_string(),
         codex_home.path().display().to_string(),
     );
-    env.insert("OPENAI_API_KEY".to_string(), "dummy".to_string());
 
     let args = vec![
         "resume".to_string(),

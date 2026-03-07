@@ -477,6 +477,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let thread_manager = Arc::new(ThreadManager::new(
         config.codex_home.clone(),
         auth_manager.clone(),
+        config.model_provider.clone(),
         SessionSource::Exec,
         config.model_catalog.clone(),
         CollaborationModesConfig {

@@ -7753,7 +7753,7 @@ mod tests {
         };
         let config_snapshot = ThreadConfigSnapshot {
             model: "gpt-5".to_string(),
-            model_provider_id: "openai".to_string(),
+            model_provider_id: "copilot".to_string(),
             service_tier: Some(codex_protocol::config_types::ServiceTier::Flex),
             approval_policy: codex_protocol::protocol::AskForApproval::OnRequest,
             sandbox_policy: codex_protocol::protocol::SandboxPolicy::DangerFullAccess,

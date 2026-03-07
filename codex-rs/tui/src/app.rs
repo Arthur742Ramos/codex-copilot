@@ -1649,6 +1649,7 @@ impl App {
         let thread_manager = Arc::new(ThreadManager::new(
             config.codex_home.clone(),
             auth_manager.clone(),
+            config.model_provider.clone(),
             SessionSource::Cli,
             config.model_catalog.clone(),
             CollaborationModesConfig {

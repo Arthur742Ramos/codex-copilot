@@ -20,11 +20,11 @@ usage() {
   cat <<'USAGE'
 Usage: codex-copilot-setup.sh [OPTIONS]
 
-Configure OpenAI Codex CLI to use GitHub Copilot as a model provider.
+Configure Codex to use GitHub Copilot.
 
 Options:
   --dry-run     Show what would be changed without writing files
-  -y, --yes     Assume yes for prompts (overwrite model/model_provider)
+  -y, --yes     Assume yes for prompts (overwrite model)
   --help        Show this help message
 USAGE
 }
@@ -149,71 +149,22 @@ update_config() {
     touch "$config_file"
   fi
 
-  local current_model="" current_provider=""
+  local current_model=""
   if [[ -f "$config_file" ]]; then
     current_model="$(grep -E '^[[:space:]]*model[[:space:]]*=' "$config_file" | head -n1 | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]+)"?.*$/\1/' || true)"
-    current_provider="$(grep -E '^[[:space:]]*model_provider[[:space:]]*=' "$config_file" | head -n1 | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]+)"?.*$/\1/' || true)"
   fi
 
-  local set_model=1 set_provider=1
+  local set_model=1
   if [[ -n "$current_model" && "$current_model" != "gpt-4.1" ]]; then
     if ! confirm "config.toml has model='$current_model'. Overwrite to 'gpt-4.1'?"; then
       set_model=0
     fi
   fi
-  if [[ -n "$current_provider" && "$current_provider" != "copilot" ]]; then
-    if ! confirm "config.toml has model_provider='$current_provider'. Overwrite to 'copilot'?"; then
-      set_provider=0
-    fi
-  fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    info "[dry-run] Would update [model_providers.copilot] section"
     [[ "$set_model" -eq 1 ]] && info "[dry-run] Would set model = \"gpt-4.1\""
-    [[ "$set_provider" -eq 1 ]] && info "[dry-run] Would set model_provider = \"copilot\""
     return 0
   fi
-
-  local tmp
-  tmp="$(mktemp)"
-  python3 - "$config_file" "$tmp" <<'PY'
-import sys
-from pathlib import Path
-
-src = Path(sys.argv[1])
-dst = Path(sys.argv[2])
-text = src.read_text(encoding="utf-8") if src.exists() else ""
-lines = text.splitlines()
-out = []
-skip = False
-for line in lines:
-    stripped = line.strip()
-    if stripped == "[model_providers.copilot]":
-        skip = True
-        continue
-    if skip and stripped.startswith("[") and stripped.endswith("]"):
-        skip = False
-        out.append(line)
-        continue
-    if not skip:
-        out.append(line)
-while out and out[-1] == "":
-    out.pop()
-if out:
-    out.append("")
-out.extend([
-    "[model_providers.copilot]",
-    'name = "GitHub Copilot"',
-    'base_url = "https://api.githubcopilot.com"',
-    'env_key = "GH_COPILOT_TOKEN"',
-    'wire_api = "responses"',
-    'http_headers = { "Editor-Version" = "codex-cli/1.0", "Copilot-Integration-Id" = "codex-cli" }',
-    "",
-])
-dst.write_text("\n".join(out), encoding="utf-8")
-PY
-
-  mv "$tmp" "$config_file"
 
   if [[ "$set_model" -eq 1 ]]; then
     if grep -qE '^[[:space:]]*model[[:space:]]*=' "$config_file"; then
@@ -230,24 +181,6 @@ if n:
 PY
     else
       { printf 'model = "gpt-4.1"\n'; cat "$config_file"; } >"$config_file.new" && mv "$config_file.new" "$config_file"
-    fi
-  fi
-
-  if [[ "$set_provider" -eq 1 ]]; then
-    if grep -qE '^[[:space:]]*model_provider[[:space:]]*=' "$config_file"; then
-      python3 - "$config_file" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-text, n = re.subn(r'(?m)^[ \t]*model_provider[ \t]*=.*$', 'model_provider = "copilot"', text, count=1)
-if n:
-    path.write_text(text, encoding="utf-8")
-PY
-    else
-      { printf 'model_provider = "copilot"\n'; cat "$config_file"; } >"$config_file.new" && mv "$config_file.new" "$config_file"
     fi
   fi
 

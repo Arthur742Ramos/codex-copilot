@@ -26,6 +26,7 @@ const MAX_STREAM_MAX_RETRIES: u64 = 100;
 /// Hard cap for user-configured `request_max_retries`.
 const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
+const COPILOT_PROVIDER_NAME: &str = "GitHub Copilot";
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.\nMore info: https://github.com/openai/codex/discussions/7782";
 pub(crate) const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
@@ -268,7 +269,7 @@ impl ModelProviderInfo {
 
     pub fn create_copilot_provider() -> ModelProviderInfo {
         ModelProviderInfo {
-            name: "GitHub Copilot".into(),
+            name: COPILOT_PROVIDER_NAME.into(),
             base_url: Some("https://api.githubcopilot.com".into()),
             env_key: None,
             env_key_instructions: None,
@@ -316,10 +317,8 @@ pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
 pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
 
-    // This fork keeps the upstream OpenAI and OSS defaults and adds a built-in
-    // GitHub Copilot provider.
+    // This fork defaults to GitHub Copilot and keeps the OSS defaults.
     [
-        ("openai", P::create_openai_provider()),
         ("copilot", P::create_copilot_provider()),
         (
             OLLAMA_OSS_PROVIDER_ID,

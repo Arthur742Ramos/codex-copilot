@@ -2,6 +2,9 @@
 
 Use [OpenAI Codex CLI](https://github.com/openai/codex) with your GitHub Copilot subscription — no OpenAI API key needed.
 
+This fork defaults to the built-in `copilot` provider, so you do not need to
+set `model_provider = "copilot"` in `~/.codex/config.toml`.
+
 ## Key Discovery
 
 GitHub Copilot **supports the Responses API** at `https://api.githubcopilot.com/responses` — the same wire protocol Codex uses. Models with `/responses` support: `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, `gpt-5.2`.
@@ -23,7 +26,6 @@ npx copilot-api
 # 2. Configure Codex CLI to use it (proxy runs on port 4141)
 cat >> ~/.codex/config.toml << 'EOF'
 model = "gpt-5.1-codex"
-model_provider = "copilot"
 
 [model_providers.copilot]
 name = "GitHub Copilot (via proxy)"
@@ -45,9 +47,42 @@ The included setup script validates your Copilot access and generates the config
 ./scripts/codex-copilot-setup.sh
 ```
 
+## GitHub Releases
+
+If you do not want to compile locally, use the manual GitHub Actions release
+workflow in this fork. It builds the binary on GitHub and publishes a release
+asset you can install directly.
+
+For this machine, the target is `aarch64-apple-darwin`.
+
+Fast path:
+
+```bash
+./scripts/install-copilot-release.sh latest
+```
+
+Or use the manual steps:
+
+```bash
+# 1. Build and publish a release from this fork.
+gh workflow run fork-release.yml -f version=0.1.0 -f target=aarch64-apple-darwin
+
+# 2. Download the release asset after the workflow completes.
+gh release download copilot-v0.1.0 -p 'codex-aarch64-apple-darwin.tar.gz' -D /tmp/codex-release
+
+# 3. Install just the compiled binary.
+tar -xzf /tmp/codex-release/codex-aarch64-apple-darwin.tar.gz -C /tmp/codex-release
+install -d ~/.local/codex-copilot/bin
+install -m 755 /tmp/codex-release/codex ~/.local/codex-copilot/bin/codex
+```
+
+If you already use a wrapper such as `~/bin/codex`, point it at
+`~/.local/codex-copilot/bin/codex` instead of a local `target/debug` binary.
+
+
 ## Fork Approach (Built-in Provider)
 
-For a first-class experience with automatic token discovery, you can fork openai/codex and add a built-in `copilot` provider. See [`docs/fork-guide/`](docs/fork-guide/) for:
+For a first-class experience with automatic token discovery, this fork ships a built-in `copilot` provider and uses it by default. See [`docs/fork-guide/`](docs/fork-guide/) for the underlying implementation details:
 
 - **[README.md](docs/fork-guide/README.md)** — Step-by-step fork & build guide
 - **[model_provider_info.patch](docs/fork-guide/model_provider_info.patch)** — Rust code to add `create_copilot_provider()`

@@ -1,7 +1,6 @@
 #![allow(clippy::expect_used)]
 use codex_core::CodexAuth;
 use codex_core::ModelProviderInfo;
-use codex_core::built_in_model_providers;
 use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::compact::SUMMARY_PREFIX;
 use codex_core::config::Config;
@@ -93,7 +92,7 @@ fn json_fragment(text: &str) -> String {
 }
 
 fn non_openai_model_provider(server: &MockServer) -> ModelProviderInfo {
-    let mut provider = built_in_model_providers()["openai"].clone();
+    let mut provider = ModelProviderInfo::create_openai_provider();
     provider.name = "OpenAI (test)".into();
     provider.base_url = Some(format!("{}/v1", server.uri()));
     provider
