@@ -29,6 +29,24 @@ Then run Codex as usual:
 codex
 ```
 
+If you install a release build, install the wrapper from this repo so `codex`
+keeps reusing your GitHub auth before falling back to device flow:
+
+```bash
+./scripts/install-copilot-release.sh latest
+./scripts/install-codex-wrapper.sh
+```
+
+The wrapper checks these sources in order:
+
+1. `GH_COPILOT_TOKEN`
+2. `gh auth token`
+3. `~/.config/github-copilot/hosts.json`
+4. `~/.config/github-copilot/apps.json`
+5. `~/.config/codex-copilot/token.json`
+
+If none of those are available, it runs device flow.
+
 ## Model availability
 
 This fork does not hardcode a permanent model allowlist beyond the built-in

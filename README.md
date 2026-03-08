@@ -59,6 +59,27 @@ and **Windows** (x86_64). No compilation needed.
 ./scripts/install-copilot-release.sh latest
 ```
 
+### Install the wrapper
+
+After installing the release binary, install the repo-managed `codex` wrapper:
+
+```bash
+./scripts/install-codex-wrapper.sh
+```
+
+That creates `~/bin/codex` by default and makes the wrapper prefer reusable auth
+sources in this order:
+
+1. Existing `GH_COPILOT_TOKEN`
+2. `gh auth token`
+3. `~/.config/github-copilot/hosts.json`
+4. `~/.config/github-copilot/apps.json`
+5. `~/.config/codex-copilot/token.json`
+6. Device flow as a last resort
+
+With `gh auth login` already set up, this means you should not need to keep
+redoing device login.
+
 ### Trigger a new release
 
 ```bash
@@ -84,6 +105,18 @@ install -m 755 /tmp/codex-release/codex ~/.local/codex-copilot/bin/codex
 
 If you already use a wrapper such as `~/bin/codex`, point it at
 `~/.local/codex-copilot/bin/codex` instead of a local `target/debug` binary.
+
+### Recommended auth setup
+
+Use `gh auth` as the long-lived credential source:
+
+```bash
+gh auth login
+gh auth status
+```
+
+Then use the installed wrapper. Avoid pinning a stale `GH_COPILOT_TOKEN` in
+your shell startup files unless you intentionally want it to override `gh auth`.
 
 
 ## Fork Approach (Built-in Provider)
