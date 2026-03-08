@@ -161,6 +161,33 @@ jobs:
         run: |
           set -euo pipefail
           sudo dpkg --add-architecture arm64
+          sudo python3 - <<'PY'
+          from pathlib import Path
+
+          amd64_sources = Path("/etc/apt/sources.list.d/ubuntu.sources")
+          text = amd64_sources.read_text()
+          if "Architectures: amd64" not in text:
+              text = text.replace(
+                  "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg",
+                  "Architectures: amd64\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg",
+              )
+              amd64_sources.write_text(text)
+          PY
+          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-backports
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross \
