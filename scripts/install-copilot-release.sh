@@ -52,7 +52,7 @@ resolve_repo() {
 resolve_latest_tag() {
   local repo="$1"
   local tag
-  tag="$(gh release list --repo "$repo" --limit 100 | awk '$1 ~ /^copilot-v/ { print $1; exit }')"
+  tag="$(gh release list --repo "$repo" --limit 100 --json tagName --jq '.[].tagName | select(startswith("copilot-v"))' | head -1)"
   if [[ -z "$tag" ]]; then
     echo "No copilot-v release found in $repo" >&2
     exit 1
