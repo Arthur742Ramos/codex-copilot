@@ -1,10 +1,12 @@
 //! GitHub Copilot token discovery and validation.
 //!
 //! Discovers GitHub OAuth tokens from multiple sources, in priority order:
-//! 1. `GH_COPILOT_TOKEN` environment variable
-//! 2. `~/.config/github-copilot/hosts.json` (VS Code, JetBrains, etc.)
-//! 3. `~/.config/github-copilot/apps.json` (newer Copilot installations)
-//! 4. `gh auth token` CLI command output
+//! 1. `CODEX_GH_COPILOT_TOKEN` environment variable
+//! 2. `GH_COPILOT_TOKEN` environment variable (legacy fallback)
+//! 3. `~/.config/github-copilot/hosts.json` (VS Code, JetBrains, etc.)
+//! 4. `~/.config/github-copilot/apps.json` (newer Copilot installations)
+//! 5. `~/.config/codex-copilot/token.json` (device flow cache)
+//! 6. `gh auth token` CLI command output
 //!
 //! # Usage
 //!
@@ -35,10 +37,12 @@ struct HostEntry {
 /// Checks sources in priority order and returns the first valid token found.
 /// Returns `None` if no token is available from any source.
 pub fn discover_github_token() -> Option<String> {
-    // 1. Environment variable (highest priority — explicit user intent)
-    if let Ok(token) = std::env::var("GH_COPILOT_TOKEN") {
-        if !token.is_empty() {
-            return Some(token);
+    // 1. Environment variables (highest priority — explicit user intent)
+    for env_var in ["CODEX_GH_COPILOT_TOKEN", "GH_COPILOT_TOKEN"] {
+        if let Ok(token) = std::env::var(env_var) {
+            if !token.is_empty() {
+                return Some(token);
+            }
         }
     }
 
@@ -52,7 +56,12 @@ pub fn discover_github_token() -> Option<String> {
         return Some(token);
     }
 
-    // 4. GitHub CLI (requires `gh` to be installed and authenticated)
+    // 4. Device flow cache used by codex-copilot
+    if let Some(token) = read_token_from_device_flow_cache() {
+        return Some(token);
+    }
+
+    // 5. GitHub CLI (requires `gh` to be installed and authenticated)
     if let Some(token) = read_token_from_gh_cli() {
         return Some(token);
     }
@@ -167,20 +176,20 @@ mod tests {
     #[test]
     fn test_env_var_takes_priority() {
         // Set env var and verify it's returned
-        std::env::set_var("GH_COPILOT_TOKEN", "gho_test_token_123");
+        std::env::set_var("CODEX_GH_COPILOT_TOKEN", "gho_test_token_123");
         let token = discover_github_token();
         assert_eq!(token, Some("gho_test_token_123".to_string()));
-        std::env::remove_var("GH_COPILOT_TOKEN");
+        std::env::remove_var("CODEX_GH_COPILOT_TOKEN");
     }
 
     #[test]
     fn test_empty_env_var_is_skipped() {
-        std::env::set_var("GH_COPILOT_TOKEN", "");
+        std::env::set_var("CODEX_GH_COPILOT_TOKEN", "");
         // Won't return empty string; falls through to other sources
         // (which may or may not find a token depending on the test env)
         let token = discover_github_token();
         assert_ne!(token, Some("".to_string()));
-        std::env::remove_var("GH_COPILOT_TOKEN");
+        std::env::remove_var("CODEX_GH_COPILOT_TOKEN");
     }
 
     #[test]
@@ -201,6 +210,7 @@ mod tests {
 
         // Point XDG_CONFIG_HOME to our temp dir
         std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+        std::env::remove_var("CODEX_GH_COPILOT_TOKEN");
         std::env::remove_var("GH_COPILOT_TOKEN");
 
         let token = read_token_from_config("hosts.json");
@@ -208,4 +218,24 @@ mod tests {
 
         std::env::remove_var("XDG_CONFIG_HOME");
     }
+}
+fn read_token_from_device_flow_cache() -> Option<String> {
+    let xdg_config = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("~"))
+                .join(".config")
+        });
+    let path = xdg_config.join("codex-copilot").join("token.json");
+    if let Ok(content) = std::fs::read_to_string(path) {
+        if let Ok(data) = serde_json::from_str::<HashMap<String, String>>(&content) {
+            if let Some(token) = data.get("github_token")
+                && !token.is_empty()
+            {
+                return Some(token.clone());
+            }
+        }
+    }
+    None
 }

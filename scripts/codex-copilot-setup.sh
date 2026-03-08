@@ -64,9 +64,16 @@ PY
 extract_token() {
   local token=""
 
+  if [[ -n "${CODEX_GH_COPILOT_TOKEN:-}" ]]; then
+    token="$CODEX_GH_COPILOT_TOKEN"
+    info "Using token from CODEX_GH_COPILOT_TOKEN"
+    printf '%s' "$token"
+    return 0
+  fi
+
   if [[ -n "${GH_COPILOT_TOKEN:-}" ]]; then
     token="$GH_COPILOT_TOKEN"
-    info "Using token from GH_COPILOT_TOKEN"
+    info "Using token from GH_COPILOT_TOKEN (legacy fallback)"
     printf '%s' "$token"
     return 0
   fi
@@ -190,7 +197,7 @@ PY
 print_snippet() {
   cat <<'SNIPPET'
 # Extract GitHub Copilot token for Codex CLI
-export GH_COPILOT_TOKEN=$(cat ~/.config/github-copilot/hosts.json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('github.com',{}).get('oauth_token',''))" 2>/dev/null)
+export CODEX_GH_COPILOT_TOKEN=$(cat ~/.config/github-copilot/hosts.json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('github.com',{}).get('oauth_token',''))" 2>/dev/null)
 SNIPPET
 }
 
@@ -252,7 +259,7 @@ fi
 
 info "Locating GitHub Copilot token"
 if ! TOKEN="$(extract_token)" || [[ -z "$TOKEN" ]]; then
-  error "Could not find a GitHub OAuth token. Try: gh auth login, or set GH_COPILOT_TOKEN, or install GitHub Copilot extension and sign in."
+  error "Could not find a GitHub OAuth token. Try: gh auth login, set CODEX_GH_COPILOT_TOKEN (or legacy GH_COPILOT_TOKEN), or install GitHub Copilot extension and sign in."
   exit 1
 fi
 success "Found token"

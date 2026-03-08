@@ -7,10 +7,12 @@ This fork carries the latest upstream Codex tree and adds a built-in
 
 - Built-in `copilot` provider registration in `codex-rs/core`
 - GitHub token discovery from:
-  1. `GH_COPILOT_TOKEN`
-  2. `~/.config/github-copilot/hosts.json`
-  3. `~/.config/github-copilot/apps.json`
-  4. `gh auth token`
+  1. `CODEX_GH_COPILOT_TOKEN`
+  2. `GH_COPILOT_TOKEN` (legacy fallback)
+  3. `~/.config/github-copilot/hosts.json`
+  4. `~/.config/github-copilot/apps.json`
+  5. `~/.config/codex-copilot/token.json`
+  6. `gh auth token`
 - Exchange of the GitHub OAuth token for a short-lived Copilot session token
   before requests are sent to `api.githubcopilot.com`
 
@@ -39,11 +41,12 @@ keeps reusing your GitHub auth before falling back to device flow:
 
 The wrapper checks these sources in order:
 
-1. `GH_COPILOT_TOKEN`
-2. `gh auth token`
+1. `CODEX_GH_COPILOT_TOKEN`
+2. `GH_COPILOT_TOKEN` (legacy fallback)
 3. `~/.config/github-copilot/hosts.json`
 4. `~/.config/github-copilot/apps.json`
 5. `~/.config/codex-copilot/token.json`
+6. `gh auth token`
 
 If none of those are available, it runs device flow.
 

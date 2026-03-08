@@ -73,17 +73,19 @@ The provider needs a GitHub OAuth token. Options (in priority order):
 ### Option A: Environment variable
 
 ```bash
-export GH_COPILOT_TOKEN=$(gh auth token)
+export CODEX_GH_COPILOT_TOKEN=$(gh auth token)
 ```
 
 ### Option B: Automatic discovery
 
 The auth module automatically checks:
 
-1. `GH_COPILOT_TOKEN` env var
-2. `~/.config/github-copilot/hosts.json` (VS Code / JetBrains)
-3. `~/.config/github-copilot/apps.json`
-4. Output of `gh auth token`
+1. `CODEX_GH_COPILOT_TOKEN` env var
+2. `GH_COPILOT_TOKEN` env var (legacy fallback)
+3. `~/.config/github-copilot/hosts.json` (VS Code / JetBrains)
+4. `~/.config/github-copilot/apps.json`
+5. `~/.config/codex-copilot/token.json`
+6. Output of `gh auth token`
 
 If you have GitHub Copilot active in any editor, a token is probably already
 present in `hosts.json`.

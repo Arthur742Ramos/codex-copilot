@@ -70,12 +70,13 @@ After installing the release binary, install the repo-managed `codex` wrapper:
 That creates `~/bin/codex` by default and makes the wrapper prefer reusable auth
 sources in this order:
 
-1. Existing `GH_COPILOT_TOKEN`
-2. `gh auth token`
+1. Existing `CODEX_GH_COPILOT_TOKEN`
+2. Existing `GH_COPILOT_TOKEN` (legacy fallback)
 3. `~/.config/github-copilot/hosts.json`
 4. `~/.config/github-copilot/apps.json`
 5. `~/.config/codex-copilot/token.json`
-6. Device flow as a last resort
+6. `gh auth token`
+7. Device flow as a last resort
 
 With `gh auth login` already set up, this means you should not need to keep
 redoing device login.
@@ -115,8 +116,9 @@ gh auth login
 gh auth status
 ```
 
-Then use the installed wrapper. Avoid pinning a stale `GH_COPILOT_TOKEN` in
-your shell startup files unless you intentionally want it to override `gh auth`.
+Then use the installed wrapper. If you want an explicit env var, prefer
+`CODEX_GH_COPILOT_TOKEN`; `GH_COPILOT_TOKEN` is still accepted as a legacy
+fallback.
 
 
 ## Fork Approach (Built-in Provider)

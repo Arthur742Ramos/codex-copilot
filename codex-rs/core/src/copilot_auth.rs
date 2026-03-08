@@ -19,6 +19,8 @@ const COPILOT_EDITOR_PLUGIN_VERSION: &str = "copilot-chat/0.26.7";
 const COPILOT_USER_AGENT: &str = "GitHubCopilotChat/0.26.7";
 const COPILOT_API_VERSION: &str = "2025-04-01";
 const COPILOT_TOKEN_REFRESH_SKEW_SECS: i64 = 120;
+const CODEX_GH_COPILOT_TOKEN_ENV_VAR: &str = "CODEX_GH_COPILOT_TOKEN";
+const GH_COPILOT_TOKEN_ENV_VAR: &str = "GH_COPILOT_TOKEN";
 
 static COPILOT_TOKEN_CACHE: OnceLock<Mutex<Option<CachedCopilotToken>>> = OnceLock::new();
 
@@ -61,10 +63,12 @@ pub(crate) fn get_copilot_token() -> crate::error::Result<String> {
 }
 
 fn discover_github_token() -> Option<String> {
-    if let Ok(token) = std::env::var("GH_COPILOT_TOKEN")
-        && !token.trim().is_empty()
-    {
-        return Some(token);
+    for env_var in [CODEX_GH_COPILOT_TOKEN_ENV_VAR, GH_COPILOT_TOKEN_ENV_VAR] {
+        if let Ok(token) = std::env::var(env_var)
+            && !token.trim().is_empty()
+        {
+            return Some(token);
+        }
     }
 
     read_token_from_config("hosts.json")
@@ -76,9 +80,17 @@ fn discover_github_token() -> Option<String> {
 fn read_token_from_config(filename: &str) -> Option<String> {
     for config_dir in copilot_config_dirs() {
         let path = config_dir.join(filename);
-        let content = std::fs::read_to_string(path).ok()?;
-        let hosts = serde_json::from_str::<HashMap<String, HostEntry>>(&content).ok()?;
-        let entry = hosts.get("github.com")?;
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        let hosts = match serde_json::from_str::<HashMap<String, HostEntry>>(&content) {
+            Ok(hosts) => hosts,
+            Err(_) => continue,
+        };
+        let Some(entry) = hosts.get("github.com") else {
+            continue;
+        };
         if !entry.oauth_token.trim().is_empty() {
             return Some(entry.oauth_token.clone());
         }
@@ -204,9 +216,9 @@ fn connection_failed(source: reqwest::Error) -> CodexErr {
 
 fn missing_token_error() -> CodexErr {
     CodexErr::EnvVar(EnvVarError {
-        var: "GH_COPILOT_TOKEN".to_string(),
+        var: CODEX_GH_COPILOT_TOKEN_ENV_VAR.to_string(),
         instructions: Some(
-            "Set GH_COPILOT_TOKEN, sign into GitHub Copilot in VS Code/JetBrains so hosts.json exists, or run `gh auth login`.".to_string(),
+            "Set CODEX_GH_COPILOT_TOKEN (or the legacy GH_COPILOT_TOKEN), sign into GitHub Copilot in VS Code/JetBrains so hosts.json exists, or run `gh auth login`.".to_string(),
         ),
     })
 }
@@ -233,17 +245,36 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_env_var_takes_priority() {
+    fn test_codex_env_var_takes_priority_over_legacy_env_var() {
         unsafe {
-            std::env::set_var("GH_COPILOT_TOKEN", "gho_test_token_123");
+            std::env::set_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR, "gho_codex_token_123");
+            std::env::set_var(GH_COPILOT_TOKEN_ENV_VAR, "gho_legacy_token_123");
             std::env::remove_var("XDG_CONFIG_HOME");
         }
         assert_eq!(
             discover_github_token(),
-            Some("gho_test_token_123".to_string())
+            Some("gho_codex_token_123".to_string())
         );
         unsafe {
-            std::env::remove_var("GH_COPILOT_TOKEN");
+            std::env::remove_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR);
+            std::env::remove_var(GH_COPILOT_TOKEN_ENV_VAR);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_legacy_env_var_is_still_supported() {
+        unsafe {
+            std::env::remove_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR);
+            std::env::set_var(GH_COPILOT_TOKEN_ENV_VAR, "gho_legacy_token_123");
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        assert_eq!(
+            discover_github_token(),
+            Some("gho_legacy_token_123".to_string())
+        );
+        unsafe {
+            std::env::remove_var(GH_COPILOT_TOKEN_ENV_VAR);
         }
     }
 
@@ -264,7 +295,8 @@ mod tests {
         .unwrap();
 
         unsafe {
-            std::env::remove_var("GH_COPILOT_TOKEN");
+            std::env::remove_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR);
+            std::env::remove_var(GH_COPILOT_TOKEN_ENV_VAR);
             std::env::set_var("XDG_CONFIG_HOME", tmp.path());
         }
         assert_eq!(

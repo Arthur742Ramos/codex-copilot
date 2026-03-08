@@ -25,10 +25,12 @@ This is the **Responses API** endpoint — the same wire format that
 
 ### Token Discovery Priority
 
-1. `GH_COPILOT_TOKEN` environment variable
-2. `~/.config/github-copilot/hosts.json` → `github.com.oauth_token`
-3. `~/.config/github-copilot/apps.json` → `github.com.oauth_token`
-4. `gh auth token` command output
+1. `CODEX_GH_COPILOT_TOKEN` environment variable
+2. `GH_COPILOT_TOKEN` environment variable (legacy fallback)
+3. `~/.config/github-copilot/hosts.json` → `github.com.oauth_token`
+4. `~/.config/github-copilot/apps.json` → `github.com.oauth_token`
+5. `~/.config/codex-copilot/token.json` → `github_token`
+6. `gh auth token` command output
 
 ### Authorization Header
 
