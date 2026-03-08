@@ -22,7 +22,7 @@ curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/latest/downl
 Install a specific release:
 
 ```bash
-curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.1.0/install.sh | bash -s -- copilot-v0.1.0
+curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.2.3/install.sh | bash -s -- copilot-v0.2.3
 ```
 
 ### Windows PowerShell
@@ -37,8 +37,8 @@ Install a specific release:
 
 ```powershell
 $tmp = Join-Path $env:TEMP "install-codex-copilot.ps1"
-irm https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.1.0/install.ps1 -OutFile $tmp
-& $tmp copilot-v0.1.0
+irm https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.2.3/install.ps1 -OutFile $tmp
+& $tmp copilot-v0.2.3
 ```
 
 The installers place the real binary here by default:
@@ -74,11 +74,11 @@ The release workflow supports both manual dispatch and pushed tags:
 
 ```bash
 # Manual dispatch
-gh workflow run fork-release.yml -f version=0.1.0
+gh workflow run fork-release.yml -f version=0.2.3
 
 # Or create a release from a tag push
-git tag -a copilot-v0.1.0 -m "codex-copilot 0.1.0"
-git push origin copilot-v0.1.0
+git tag -a copilot-v0.2.3 -m "codex-copilot 0.2.3"
+git push origin copilot-v0.2.3
 ```
 
 Manual dispatch also supports single-target builds with `target=<triple>`.

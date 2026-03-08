@@ -72,14 +72,14 @@ and Windows directly from GitHub Actions.
 Manual dispatch:
 
 ```bash
-gh workflow run fork-release.yml -f version=0.1.0
+gh workflow run fork-release.yml -f version=0.2.3
 ```
 
 Tag-driven release:
 
 ```bash
-git tag -a copilot-v0.1.0 -m "codex-copilot 0.1.0"
-git push origin copilot-v0.1.0
+git tag -a copilot-v0.2.3 -m "codex-copilot 0.2.3"
+git push origin copilot-v0.2.3
 ```
 
 ## Model availability
