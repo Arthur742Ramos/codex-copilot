@@ -30,6 +30,7 @@ cat >"$TARGET_PATH" <<EOF
 set -euo pipefail
 
 PROXY_SCRIPT="$PROXY_SCRIPT"
+PROXY_DIR="$(dirname "$PROXY_SCRIPT")"
 TOKEN_FILE="\$HOME/.config/codex-copilot/token.json"
 INSTALLER_SCRIPT="$INSTALLER_SCRIPT"
 REAL_CODEX="$REAL_CODEX"
@@ -64,20 +65,9 @@ if token:
 PY
 }
 
-# Prefer reusable GitHub auth sources before the saved device-flow token.
-if [ -z "\${GH_COPILOT_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
-    GH_COPILOT_TOKEN="\$(gh auth token 2>/dev/null || true)"
-    if [ -n "\$GH_COPILOT_TOKEN" ]; then
-        export GH_COPILOT_TOKEN
-    fi
-fi
-
+# Prefer reusable Copilot-specific auth sources first.
 if [ -z "\${GH_COPILOT_TOKEN:-}" ]; then
-    for copilot_config in \
-        "\$HOME/.config/github-copilot/hosts.json" \
-        "\$HOME/.config/github-copilot/apps.json" \
-        "\$HOME/Library/Application Support/github-copilot/hosts.json" \
-        "\$HOME/Library/Application Support/github-copilot/apps.json"
+    for copilot_config in "\$HOME/.config/github-copilot/hosts.json" "\$HOME/.config/github-copilot/apps.json" "\$HOME/Library/Application Support/github-copilot/hosts.json" "\$HOME/Library/Application Support/github-copilot/apps.json"
     do
         GH_COPILOT_TOKEN="\$(read_json_token "\$copilot_config" "copilot-config" || true)"
         if [ -n "\$GH_COPILOT_TOKEN" ]; then
@@ -94,10 +84,18 @@ if [ -z "\${GH_COPILOT_TOKEN:-}" ]; then
     fi
 fi
 
+# Fall back to gh auth only when no Copilot token source is available.
+if [ -z "\${GH_COPILOT_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+    GH_COPILOT_TOKEN="\$(gh auth token 2>/dev/null || true)"
+    if [ -n "\$GH_COPILOT_TOKEN" ]; then
+        export GH_COPILOT_TOKEN
+    fi
+fi
+
 if [ -z "\${GH_COPILOT_TOKEN:-}" ]; then
     echo "No Copilot token found. Running device flow login..."
     python3 "\$PROXY_SCRIPT" --login-only 2>/dev/null || python3 -c "
-import sys; sys.path.insert(0, '$(dirname "\$PROXY_SCRIPT")')
+import sys; sys.path.insert(0, '$(dirname "$PROXY_SCRIPT")')
 from proxy import github_device_flow
 github_device_flow()
 " || {
