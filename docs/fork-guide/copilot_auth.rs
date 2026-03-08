@@ -2,11 +2,7 @@
 //!
 //! Discovers GitHub OAuth tokens from multiple sources, in priority order:
 //! 1. `CODEX_GH_COPILOT_TOKEN` environment variable
-//! 2. `GH_COPILOT_TOKEN` environment variable (legacy fallback)
-//! 3. `~/.config/github-copilot/hosts.json` (VS Code, JetBrains, etc.)
-//! 4. `~/.config/github-copilot/apps.json` (newer Copilot installations)
-//! 5. `~/.config/codex-copilot/token.json` (device flow cache)
-//! 6. `gh auth token` CLI command output
+//! 2. `~/.config/codex-copilot/token.json` (device flow cache)
 //!
 //! # Usage
 //!
@@ -37,32 +33,15 @@ struct HostEntry {
 /// Checks sources in priority order and returns the first valid token found.
 /// Returns `None` if no token is available from any source.
 pub fn discover_github_token() -> Option<String> {
-    // 1. Environment variables (highest priority — explicit user intent)
-    for env_var in ["CODEX_GH_COPILOT_TOKEN", "GH_COPILOT_TOKEN"] {
-        if let Ok(token) = std::env::var(env_var) {
-            if !token.is_empty() {
-                return Some(token);
-            }
+    // 1. Environment variable (highest priority — explicit user intent)
+    if let Ok(token) = std::env::var("CODEX_GH_COPILOT_TOKEN") {
+        if !token.is_empty() {
+            return Some(token);
         }
     }
 
-    // 2. hosts.json (written by VS Code / JetBrains Copilot extensions)
-    if let Some(token) = read_token_from_config("hosts.json") {
-        return Some(token);
-    }
-
-    // 3. apps.json (newer Copilot installations)
-    if let Some(token) = read_token_from_config("apps.json") {
-        return Some(token);
-    }
-
-    // 4. Device flow cache used by codex-copilot
+    // 2. Device flow cache used by codex-copilot
     if let Some(token) = read_token_from_device_flow_cache() {
-        return Some(token);
-    }
-
-    // 5. GitHub CLI (requires `gh` to be installed and authenticated)
-    if let Some(token) = read_token_from_gh_cli() {
         return Some(token);
     }
 
@@ -183,16 +162,6 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_env_var_is_skipped() {
-        std::env::set_var("CODEX_GH_COPILOT_TOKEN", "");
-        // Won't return empty string; falls through to other sources
-        // (which may or may not find a token depending on the test env)
-        let token = discover_github_token();
-        assert_ne!(token, Some("".to_string()));
-        std::env::remove_var("CODEX_GH_COPILOT_TOKEN");
-    }
-
-    #[test]
     fn test_parse_hosts_json() {
         let tmp = TempDir::new().unwrap();
         let copilot_dir = tmp.path().join("github-copilot");
@@ -215,6 +184,25 @@ mod tests {
 
         let token = read_token_from_config("hosts.json");
         assert_eq!(token, Some("gho_from_hosts_json".to_string()));
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    fn test_device_flow_cache_is_used() {
+        let tmp = TempDir::new().unwrap();
+        let codex_dir = tmp.path().join("codex-copilot");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+
+        let mut f = std::fs::File::create(codex_dir.join("token.json")).unwrap();
+        f.write_all(br#"{"github_token":"gho_from_device_flow"}"#)
+            .unwrap();
+
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+        std::env::remove_var("CODEX_GH_COPILOT_TOKEN");
+
+        let token = discover_github_token();
+        assert_eq!(token, Some("gho_from_device_flow".to_string()));
 
         std::env::remove_var("XDG_CONFIG_HOME");
     }

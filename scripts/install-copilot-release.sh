@@ -3,16 +3,12 @@ set -euo pipefail
 
 VERSION="${1:-latest}"
 INSTALL_DIR="${CODEX_INSTALL_DIR:-$HOME/.local/codex-copilot/bin}"
+REPO="${CODEX_RELEASE_REPO:-Arthur742Ramos/codex-copilot}"
+path_action="already"
+path_profile=""
 
 step() {
   printf '==> %s\n' "$1"
-}
-
-require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "$1 is required." >&2
-    exit 1
-  fi
 }
 
 normalize_version() {
@@ -32,33 +28,113 @@ normalize_version() {
   esac
 }
 
-resolve_repo() {
-  if [[ -n "${CODEX_RELEASE_REPO:-}" ]]; then
-    printf '%s\n' "$CODEX_RELEASE_REPO"
+download_file() {
+  local url="$1"
+  local output="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$output"
     return
   fi
 
-  local remote
-  remote="$(git config --get remote.origin.url 2>/dev/null || true)"
-  if [[ "$remote" =~ github\.com[:/]([^/]+/[^/.]+)(\.git)?$ ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -O "$output" "$url"
     return
   fi
 
-  echo "Set CODEX_RELEASE_REPO=owner/repo or run from a git checkout with an origin remote." >&2
+  echo "curl or wget is required to install codex-copilot." >&2
   exit 1
 }
 
-resolve_latest_tag() {
-  local repo="$1"
-  local tag
-  tag="$(gh release list --repo "$repo" --limit 100 --json tagName --jq '.[].tagName | select(startswith("copilot-v"))' | head -1)"
-  if [[ -z "$tag" ]]; then
-    echo "No copilot-v release found in $repo" >&2
+download_text() {
+  local url="$1"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url"
+    return
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -O - "$url"
+    return
+  fi
+
+  echo "curl or wget is required to install codex-copilot." >&2
+  exit 1
+}
+
+add_to_path() {
+  path_action="already"
+  path_profile=""
+
+  case ":$PATH:" in
+    *":$INSTALL_DIR:"*)
+      return
+      ;;
+  esac
+
+  local profile="$HOME/.profile"
+  case "${SHELL:-}" in
+    */zsh)
+      profile="$HOME/.zshrc"
+      ;;
+    */bash)
+      profile="$HOME/.bashrc"
+      ;;
+  esac
+
+  path_profile="$profile"
+  local path_line="export PATH=\"$INSTALL_DIR:\$PATH\""
+  if [ -f "$profile" ] && grep -F "$path_line" "$profile" >/dev/null 2>&1; then
+    path_action="configured"
+    return
+  fi
+
+  {
+    printf '\n# Added by codex-copilot installer\n'
+    printf '%s\n' "$path_line"
+  } >>"$profile"
+  path_action="added"
+}
+
+release_url_for_asset() {
+  local asset="$1"
+  local resolved_version="$2"
+
+  printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$resolved_version" "$asset"
+}
+
+resolve_version() {
+  local normalized_version
+  normalized_version="$(normalize_version "$VERSION")"
+
+  if [ "$normalized_version" != "latest" ]; then
+    printf '%s\n' "$normalized_version"
+    return
+  fi
+
+  local release_json resolved
+  release_json="$(download_text "https://api.github.com/repos/${REPO}/releases/latest")"
+  resolved="$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+
+  if [ -z "$resolved" ]; then
+    echo "Failed to resolve the latest codex-copilot release version from ${REPO}." >&2
     exit 1
   fi
-  printf '%s\n' "$tag"
+
+  printf '%s\n' "$resolved"
 }
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "$1 is required to install codex-copilot." >&2
+    exit 1
+  fi
+}
+
+require_command mktemp
+require_command tar
+require_command install
 
 resolve_target() {
   local os arch
@@ -67,7 +143,7 @@ resolve_target() {
 
   case "$os" in
     Darwin)
-      if [[ "$arch" == "x86_64" ]] && [[ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" == "1" ]]; then
+      if [ "$arch" = "x86_64" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = "1" ]; then
         arch="arm64"
       fi
       case "$arch" in
@@ -98,26 +174,27 @@ resolve_target() {
       esac
       ;;
     *)
-      echo "Unsupported OS: $os" >&2
+      echo "install-copilot-release.sh supports macOS and Linux. Use install-copilot-release.ps1 on Windows." >&2
       exit 1
       ;;
   esac
 }
 
-require_command gh
-require_command tar
-require_command install
-require_command mktemp
-
-repo="$(resolve_repo)"
-if [[ "$VERSION" == "latest" ]]; then
-  tag="$(resolve_latest_tag "$repo")"
+if [ -x "$INSTALL_DIR/codex" ]; then
+  install_mode="Updating"
 else
-  tag="$(normalize_version "$VERSION")"
+  install_mode="Installing"
 fi
 
 target="$(resolve_target)"
 asset="codex-${target}.tar.gz"
+resolved_version="$(resolve_version)"
+download_url="$(release_url_for_asset "$asset" "$resolved_version")"
+
+step "$install_mode codex-copilot"
+step "Repo: $REPO"
+step "Release: $resolved_version"
+step "Target: $target"
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -125,16 +202,33 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-step "Repo: $repo"
-step "Release: $tag"
-step "Target: $target"
-step "Downloading $asset"
+archive_path="$tmp_dir/$asset"
 
-gh release download "$tag" --repo "$repo" -p "$asset" -D "$tmp_dir"
+step "Downloading $asset"
+download_file "$download_url" "$archive_path"
 
 step "Installing to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
+tar -xzf "$archive_path" -C "$tmp_dir"
 install -m 755 "$tmp_dir/codex" "$INSTALL_DIR/codex"
 
-printf 'Installed %s to %s/codex\n' "$tag" "$INSTALL_DIR"
+add_to_path
+
+case "$path_action" in
+  added)
+    step "PATH updated for future shells in $path_profile"
+    step "Run now: export PATH=\"$INSTALL_DIR:\$PATH\" && codex"
+    step "Or open a new terminal and run: codex"
+    ;;
+  configured)
+    step "PATH is already configured for future shells in $path_profile"
+    step "Run now: export PATH=\"$INSTALL_DIR:\$PATH\" && codex"
+    step "Or open a new terminal and run: codex"
+    ;;
+  *)
+    step "$INSTALL_DIR is already on PATH"
+    step "Run: codex"
+    ;;
+esac
+
+printf 'codex-copilot %s installed successfully.\n' "$resolved_version"

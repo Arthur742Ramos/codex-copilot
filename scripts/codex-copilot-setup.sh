@@ -61,6 +61,36 @@ PY
   return 1
 }
 
+parse_codex_token() {
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+
+  if has_cmd jq; then
+    jq -r '.github_token // empty' "$file" 2>/dev/null || true
+    return 0
+  fi
+
+  if has_cmd python3; then
+    python3 - "$file" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    print(data.get("github_token") or "")
+except Exception:
+    print("")
+PY
+    return 0
+  fi
+
+  return 1
+}
+
 extract_token() {
   local token=""
 
@@ -71,34 +101,11 @@ extract_token() {
     return 0
   fi
 
-  if [[ -n "${GH_COPILOT_TOKEN:-}" ]]; then
-    token="$GH_COPILOT_TOKEN"
-    info "Using token from GH_COPILOT_TOKEN (legacy fallback)"
-    printf '%s' "$token"
-    return 0
-  fi
-
-  token="$(parse_json_field "$HOME/.config/github-copilot/hosts.json")"
+  token="$(parse_codex_token "$HOME/.config/codex-copilot/token.json")"
   if [[ -n "$token" ]]; then
-    info "Using token from ~/.config/github-copilot/hosts.json"
+    info "Using token from ~/.config/codex-copilot/token.json"
     printf '%s' "$token"
     return 0
-  fi
-
-  token="$(parse_json_field "$HOME/.config/github-copilot/apps.json")"
-  if [[ -n "$token" ]]; then
-    info "Using token from ~/.config/github-copilot/apps.json"
-    printf '%s' "$token"
-    return 0
-  fi
-
-  if has_cmd gh; then
-    token="$(gh auth token 2>/dev/null || true)"
-    if [[ -n "$token" ]]; then
-      info "Using token from gh auth token"
-      printf '%s' "$token"
-      return 0
-    fi
   fi
 
   return 1
@@ -196,8 +203,8 @@ PY
 
 print_snippet() {
   cat <<'SNIPPET'
-# Extract GitHub Copilot token for Codex CLI
-export CODEX_GH_COPILOT_TOKEN=$(cat ~/.config/github-copilot/hosts.json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('github.com',{}).get('oauth_token',''))" 2>/dev/null)
+# Trigger Codex device login once, or set CODEX_GH_COPILOT_TOKEN explicitly
+codex
 SNIPPET
 }
 
@@ -259,7 +266,7 @@ fi
 
 info "Locating GitHub Copilot token"
 if ! TOKEN="$(extract_token)" || [[ -z "$TOKEN" ]]; then
-  error "Could not find a GitHub OAuth token. Try: gh auth login, set CODEX_GH_COPILOT_TOKEN (or legacy GH_COPILOT_TOKEN), or install GitHub Copilot extension and sign in."
+  error "Could not find a Codex GitHub token. Run codex once from an interactive terminal to complete device login, or set CODEX_GH_COPILOT_TOKEN explicitly."
   exit 1
 fi
 success "Found token"

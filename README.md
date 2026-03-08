@@ -5,129 +5,118 @@ Use [OpenAI Codex CLI](https://github.com/openai/codex) with your GitHub Copilot
 This fork defaults to the built-in `copilot` provider, so you do not need to
 set `model_provider = "copilot"` in `~/.codex/config.toml`.
 
-## Key Discovery
+## Release install
 
-GitHub Copilot **supports the Responses API** at `https://api.githubcopilot.com/responses` — the same wire protocol Codex uses. Models with `/responses` support: `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, `gpt-5.2`.
+Pre-built binaries are published by GitHub Actions for:
 
-## ⚠️ Important: Client Identity Enforcement
+- macOS: Apple Silicon, Intel
+- Linux: x86_64, ARM64
+- Windows: x86_64
 
-The Copilot API **rejects requests from unrecognized clients**. A raw `gh auth token` (gho\_) can query `/models` but gets **403 Forbidden** on `/responses` and `/chat/completions`. The API enforces a client handshake that only recognized Copilot integrations (VS Code, JetBrains, the `copilot` CLI) can complete.
-
-This means **a simple config-only approach doesn't work** — you need either a proxy that handles the handshake, or a Codex fork that implements the full Copilot auth dance.
-
-## Quick Start: Proxy Approach (Recommended)
-
-Use [ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) (2.6k ⭐) as a local proxy that handles the Copilot client handshake:
+### macOS / Linux
 
 ```bash
-# 1. Install and start the proxy
-npx copilot-api
-
-# 2. Configure Codex CLI to use it (proxy runs on port 4141)
-cat >> ~/.codex/config.toml << 'EOF'
-model = "gpt-5.1-codex"
-
-[model_providers.copilot]
-name = "GitHub Copilot (via proxy)"
-base_url = "http://127.0.0.1:4141"
-wire_api = "responses"
-EOF
-
-# 3. Use Codex as normal
-codex "explain this codebase"
+curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/latest/download/install.sh | bash
 ```
 
-> **Note:** Only models with `/responses` support work with Codex: `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, `gpt-5.2`. Claude and Gemini models only support `/chat/completions` on Copilot.
-
-### Setup script
-
-The included setup script validates your Copilot access and generates the config:
+Install a specific release:
 
 ```bash
-./scripts/codex-copilot-setup.sh
+curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.1.0/install.sh | bash -s -- copilot-v0.1.0
 ```
 
-## GitHub Releases
+### Windows PowerShell
 
-Pre-built binaries are available for **macOS** (ARM, Intel), **Linux** (x86_64, ARM64),
-and **Windows** (x86_64). No compilation needed.
-
-### Install from a release
-
-```bash
-# Automatic — detects your platform and installs the latest release
-./scripts/install-copilot-release.sh latest
+```powershell
+$tmp = Join-Path $env:TEMP "install-codex-copilot.ps1"
+irm https://github.com/Arthur742Ramos/codex-copilot/releases/latest/download/install.ps1 -OutFile $tmp
+& $tmp
 ```
 
-### Install the wrapper
+Install a specific release:
 
-After installing the release binary, install the repo-managed `codex` wrapper:
+```powershell
+$tmp = Join-Path $env:TEMP "install-codex-copilot.ps1"
+irm https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.1.0/install.ps1 -OutFile $tmp
+& $tmp copilot-v0.1.0
+```
+
+The installers place the real binary here by default:
+
+- macOS / Linux: `~/.local/codex-copilot/bin/codex`
+- Windows: `%LOCALAPPDATA%\Programs\codex-copilot\bin\codex.exe`
+
+If you prefer a small shim in `~/bin/codex`, the wrapper from this repo is
+still available, but it is optional:
 
 ```bash
 ./scripts/install-codex-wrapper.sh
 ```
 
-That creates `~/bin/codex` by default and makes the wrapper prefer reusable auth
-sources in this order:
+## Default auth behavior
+
+The built-in binary handles GitHub Copilot auth in this order:
 
 1. Existing `CODEX_GH_COPILOT_TOKEN`
-2. Existing `GH_COPILOT_TOKEN` (legacy fallback)
-3. `~/.config/github-copilot/hosts.json`
-4. `~/.config/github-copilot/apps.json`
-5. `~/.config/codex-copilot/token.json`
-6. `gh auth token`
-7. Device flow as a last resort
+2. `~/.config/codex-copilot/token.json`
+3. Device flow
 
-With `gh auth login` already set up, this means you should not need to keep
-redoing device login.
+If `CODEX_GH_COPILOT_TOKEN` is unset and there is no saved Codex token yet,
+Codex starts GitHub device flow automatically and stores the result in the
+Codex-only token cache.
 
-### Trigger a new release
+That makes the release binary the default experience for this fork. The
+wrapper and proxy flows are fallbacks, not the primary auth path.
+
+## Trigger a release
+
+The release workflow supports both manual dispatch and pushed tags:
 
 ```bash
-# Build all platforms (macOS, Linux, Windows)
+# Manual dispatch
 gh workflow run fork-release.yml -f version=0.1.0
 
-# Or build a single target
-gh workflow run fork-release.yml -f version=0.1.0 -f target=aarch64-apple-darwin
+# Or create a release from a tag push
+git tag -a copilot-v0.1.0 -m "codex-copilot 0.1.0"
+git push origin copilot-v0.1.0
 ```
+
+Manual dispatch also supports single-target builds with `target=<triple>`.
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
-`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `all` (default).
+`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+`x86_64-pc-windows-msvc`, `all` (default).
 
-### Manual install
+## Why this fork works
+
+GitHub Copilot supports the Responses API at
+`https://api.githubcopilot.com/responses`, which is the same wire protocol
+Codex already uses.
+
+The missing piece is authentication: the Copilot backend rejects unrecognized
+clients, so a raw `gh auth token` is not enough for `/responses`. This fork
+implements the Copilot token exchange and device login flow directly in the
+Codex binary.
+
+Models with `/responses` support include `gpt-5.2-codex`, `gpt-5.1-codex`,
+`gpt-5.1-codex-max`, `gpt-5.1`, `gpt-5-mini`, and `gpt-5.2`.
+
+## Proxy fallback
+
+If you want the old proxy workflow for debugging or experimentation, the repo
+still includes the setup helper:
 
 ```bash
-# Download and extract the binary for your platform
-gh release download copilot-v0.1.0 -p 'codex-aarch64-apple-darwin.tar.gz' -D /tmp/codex-release
-tar -xzf /tmp/codex-release/codex-aarch64-apple-darwin.tar.gz -C /tmp/codex-release
-install -d ~/.local/codex-copilot/bin
-install -m 755 /tmp/codex-release/codex ~/.local/codex-copilot/bin/codex
+./scripts/codex-copilot-setup.sh
 ```
 
-If you already use a wrapper such as `~/bin/codex`, point it at
-`~/.local/codex-copilot/bin/codex` instead of a local `target/debug` binary.
+## Fork internals
 
-### Recommended auth setup
-
-Use `gh auth` as the long-lived credential source:
-
-```bash
-gh auth login
-gh auth status
-```
-
-Then use the installed wrapper. If you want an explicit env var, prefer
-`CODEX_GH_COPILOT_TOKEN`; `GH_COPILOT_TOKEN` is still accepted as a legacy
-fallback.
-
-
-## Fork Approach (Built-in Provider)
-
-For a first-class experience with automatic token discovery, this fork ships a built-in `copilot` provider and uses it by default. See [`docs/fork-guide/`](docs/fork-guide/) for the underlying implementation details:
+For the provider implementation details, see [`docs/fork-guide/`](docs/fork-guide/):
 
 - **[README.md](docs/fork-guide/README.md)** — Step-by-step fork & build guide
 - **[model_provider_info.patch](docs/fork-guide/model_provider_info.patch)** — Rust code to add `create_copilot_provider()`
-- **[copilot_auth.rs](docs/fork-guide/copilot_auth.rs)** — Token discovery module (env var → hosts.json → apps.json → gh CLI)
+- **[copilot_auth.rs](docs/fork-guide/copilot_auth.rs)** — Token discovery module (env var → saved Codex device token)
 - **[integration_notes.md](docs/fork-guide/integration_notes.md)** — API details, rate limiting, premium request tracking, enterprise support
 
 ## Available Models
@@ -146,16 +135,18 @@ Common models: `gpt-4.1`, `gpt-4o`, `o4-mini`, `o3`, `claude-sonnet-4`, `gemini-
 ## How It Works
 
 ```
-┌─────────────┐                      ┌──────────────┐     Copilot Auth      ┌──────────────────────────┐
-│  Codex CLI   │   Responses API     │  copilot-api  │  ──────────────────▶  │  api.githubcopilot.com   │
-│              │ ────────────────▶   │  (proxy)      │   POST /responses    │     (Responses API)      │
-│  localhost   │  POST /responses    │  port 4141    │ ◀──────────────────   │                          │
-│  :4141       │ ◀────────────────   │  handles auth │   SSE streaming      │  Routes to: GPT-5.x,     │
-│              │  SSE streaming      │  + handshake  │                      │  GPT-4o, etc.            │
-└─────────────┘                      └──────────────┘                      └──────────────────────────┘
+┌─────────────┐    Device login / token exchange    ┌──────────────────────────┐
+│  Codex CLI   │ ─────────────────────────────────▶ │  api.githubcopilot.com   │
+│              │                                    │                          │
+│  built-in    │    Responses API + SSE streaming   │     Responses API        │
+│  copilot     │ ◀────────────────────────────────▶ │   GPT-5 / GPT-4.1 / ...  │
+│  provider    │                                    │                          │
+└─────────────┘                                     └──────────────────────────┘
 ```
 
-The proxy handles the Copilot client handshake (client identity, token exchange) that raw HTTP calls can't pass. Codex CLI sees a standard Responses API endpoint.
+The installed Codex binary handles GitHub device login, token caching, Copilot
+token exchange, and standard Responses API streaming directly. No local proxy
+is required for the default path.
 
 ## Related
 

@@ -9,6 +9,7 @@ Handles the full Copilot auth flow:
 
 Usage:
     python3 proxy.py                     # interactive device flow login
+    python3 proxy.py --login-only        # save device-flow token and exit
     python3 proxy.py --port 4141         # custom port
 """
 
@@ -335,8 +336,17 @@ def github_device_flow() -> str:
 def main():
     parser = argparse.ArgumentParser(description="Copilot Responses API proxy for Codex CLI")
     parser.add_argument("--port", type=int, default=4141, help="Port to listen on (default: 4141)")
+    parser.add_argument(
+        "--login-only",
+        action="store_true",
+        help="Run device flow, save the token, and exit without starting the proxy",
+    )
     parser.add_argument("--token", help="GitHub OAuth token (or set GH_TOKEN env var)")
     args = parser.parse_args()
+
+    if args.login_only:
+        github_device_flow()
+        return
 
     github_token = args.token or discover_github_token()
     if not github_token:

@@ -68,7 +68,7 @@ The binary lands in `target/release/codex`.
 
 ## 4. Configure Your Token
 
-The provider needs a GitHub OAuth token. Options (in priority order):
+The provider needs a Codex-managed GitHub OAuth token. Options (in priority order):
 
 ### Option A: Environment variable
 
@@ -81,14 +81,10 @@ export CODEX_GH_COPILOT_TOKEN=$(gh auth token)
 The auth module automatically checks:
 
 1. `CODEX_GH_COPILOT_TOKEN` env var
-2. `GH_COPILOT_TOKEN` env var (legacy fallback)
-3. `~/.config/github-copilot/hosts.json` (VS Code / JetBrains)
-4. `~/.config/github-copilot/apps.json`
-5. `~/.config/codex-copilot/token.json`
-6. Output of `gh auth token`
+2. `~/.config/codex-copilot/token.json`
 
-If you have GitHub Copilot active in any editor, a token is probably already
-present in `hosts.json`.
+If neither exists, run Codex from an interactive terminal once and complete
+device login.
 
 ## 5. Use It
 

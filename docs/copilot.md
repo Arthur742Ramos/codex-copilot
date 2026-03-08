@@ -8,11 +8,7 @@ This fork carries the latest upstream Codex tree and adds a built-in
 - Built-in `copilot` provider registration in `codex-rs/core`
 - GitHub token discovery from:
   1. `CODEX_GH_COPILOT_TOKEN`
-  2. `GH_COPILOT_TOKEN` (legacy fallback)
-  3. `~/.config/github-copilot/hosts.json`
-  4. `~/.config/github-copilot/apps.json`
-  5. `~/.config/codex-copilot/token.json`
-  6. `gh auth token`
+  2. `~/.config/codex-copilot/token.json`
 - Exchange of the GitHub OAuth token for a short-lived Copilot session token
   before requests are sent to `api.githubcopilot.com`
 
@@ -31,24 +27,60 @@ Then run Codex as usual:
 codex
 ```
 
-If you install a release build, install the wrapper from this repo so `codex`
-keeps reusing your GitHub auth before falling back to device flow:
+## Install a release build
+
+### macOS / Linux
 
 ```bash
-./scripts/install-copilot-release.sh latest
+curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/latest/download/install.sh | bash
+```
+
+### Windows PowerShell
+
+```powershell
+$tmp = Join-Path $env:TEMP "install-codex-copilot.ps1"
+irm https://github.com/Arthur742Ramos/codex-copilot/releases/latest/download/install.ps1 -OutFile $tmp
+& $tmp
+```
+
+The installers place the real binary on disk and update your `PATH`:
+
+- macOS / Linux: `~/.local/codex-copilot/bin`
+- Windows: `%LOCALAPPDATA%\Programs\codex-copilot\bin`
+
+If you prefer a small shim in `~/bin/codex`, the wrapper from this repo is
+still available, but it is optional and just launches the installed binary:
+
+```bash
 ./scripts/install-codex-wrapper.sh
 ```
 
-The wrapper checks these sources in order:
+The built-in binary checks these sources in order:
 
 1. `CODEX_GH_COPILOT_TOKEN`
-2. `GH_COPILOT_TOKEN` (legacy fallback)
-3. `~/.config/github-copilot/hosts.json`
-4. `~/.config/github-copilot/apps.json`
-5. `~/.config/codex-copilot/token.json`
-6. `gh auth token`
+2. `~/.config/codex-copilot/token.json`
+3. Device flow
 
-If none of those are available, it runs device flow.
+If `CODEX_GH_COPILOT_TOKEN` is not set and no saved Codex token exists yet,
+Codex runs device flow itself and saves the result.
+
+## CI release workflow
+
+The fork release workflow can publish installable binaries for macOS, Linux,
+and Windows directly from GitHub Actions.
+
+Manual dispatch:
+
+```bash
+gh workflow run fork-release.yml -f version=0.1.0
+```
+
+Tag-driven release:
+
+```bash
+git tag -a copilot-v0.1.0 -m "codex-copilot 0.1.0"
+git push origin copilot-v0.1.0
+```
 
 ## Model availability
 

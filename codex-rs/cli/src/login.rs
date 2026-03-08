@@ -7,13 +7,20 @@
 //! into a one-shot CLI command while still producing a durable `codex-login.log` artifact that
 //! support can request from users.
 
+use codex_core::CODEX_GH_COPILOT_TOKEN_ENV_VAR;
 use codex_core::CodexAuth;
+use codex_core::CopilotAuthSource;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::AuthMode;
 use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
 use codex_core::auth::logout;
+use codex_core::clear_copilot_auth;
 use codex_core::config::Config;
+use codex_core::copilot_auth_file_path;
+use codex_core::copilot_auth_source;
+use codex_core::ensure_copilot_auth;
+use codex_core::run_copilot_device_flow;
 use codex_login::ServerOptions;
 use codex_login::run_device_code_login;
 use codex_login::run_login_server;
@@ -35,6 +42,8 @@ const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
 const API_KEY_LOGIN_DISABLED_MESSAGE: &str =
     "API key login is disabled. Use ChatGPT login instead.";
 const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
+const COPILOT_STATUS_ENV_MESSAGE: &str =
+    "Logged in using GitHub Copilot via CODEX_GH_COPILOT_TOKEN";
 
 /// Installs a small file-backed tracing layer for direct `codex login` flows.
 ///
@@ -128,11 +137,54 @@ pub async fn login_with_chatgpt(
     server.block_until_done().await
 }
 
+fn uses_copilot_auth(config: &Config) -> bool {
+    config.model_provider.copilot_token_exchange
+}
+
+fn print_copilot_login_success(source: CopilotAuthSource) {
+    match source {
+        CopilotAuthSource::EnvVar => {
+            eprintln!("{LOGIN_SUCCESS_MESSAGE} using {CODEX_GH_COPILOT_TOKEN_ENV_VAR}");
+        }
+        CopilotAuthSource::DeviceCache => {
+            eprintln!(
+                "{LOGIN_SUCCESS_MESSAGE} using saved GitHub Copilot device credentials at {}",
+                copilot_auth_file_path().display()
+            );
+        }
+    }
+}
+
+pub async fn run_login_with_default_auth(cli_config_overrides: CliConfigOverrides) -> ! {
+    let config = load_config_or_exit(cli_config_overrides).await;
+    let _login_log_guard = init_login_file_logging(&config);
+
+    if uses_copilot_auth(&config) {
+        tracing::info!("starting built-in copilot auth flow");
+        match ensure_copilot_auth() {
+            Ok(source) => {
+                print_copilot_login_success(source);
+                std::process::exit(0);
+            }
+            Err(err) => {
+                eprintln!("Error logging in with GitHub Copilot: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    tracing::info!("starting browser login flow");
+    run_login_with_chatgpt_loaded_config(config).await
+}
+
 pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting browser login flow");
+    run_login_with_chatgpt_loaded_config(config).await
+}
 
+async fn run_login_with_chatgpt_loaded_config(config: Config) -> ! {
     if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
         eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
         std::process::exit(1);
@@ -222,6 +274,21 @@ pub async fn run_login_with_device_code(
 ) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
+
+    if uses_copilot_auth(&config) {
+        tracing::info!("starting copilot device login flow");
+        match run_copilot_device_flow() {
+            Ok(()) => {
+                print_copilot_login_success(CopilotAuthSource::DeviceCache);
+                std::process::exit(0);
+            }
+            Err(err) => {
+                eprintln!("Error logging in with GitHub Copilot device flow: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     tracing::info!("starting device code login flow");
     if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
         eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
@@ -316,6 +383,26 @@ pub async fn run_login_with_device_code_fallback_to_browser(
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
 
+    if uses_copilot_auth(&config) {
+        match copilot_auth_source() {
+            Some(CopilotAuthSource::EnvVar) => {
+                eprintln!("{COPILOT_STATUS_ENV_MESSAGE}");
+                std::process::exit(0);
+            }
+            Some(CopilotAuthSource::DeviceCache) => {
+                eprintln!(
+                    "Logged in using saved GitHub Copilot device credentials at {}",
+                    copilot_auth_file_path().display()
+                );
+                std::process::exit(0);
+            }
+            None => {
+                eprintln!("Not logged in");
+                std::process::exit(1);
+            }
+        }
+    }
+
     match CodexAuth::from_auth_storage(&config.codex_home, config.cli_auth_credentials_store_mode) {
         Ok(Some(auth)) => match auth.auth_mode() {
             AuthMode::ApiKey => match auth.get_token() {
@@ -346,6 +433,37 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
 
 pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
+
+    if uses_copilot_auth(&config) {
+        let env_var_set = matches!(copilot_auth_source(), Some(CopilotAuthSource::EnvVar));
+        match clear_copilot_auth() {
+            Ok(true) => {
+                if env_var_set {
+                    eprintln!(
+                        "Removed saved GitHub Copilot device credentials at {}. {CODEX_GH_COPILOT_TOKEN_ENV_VAR} is still set in the current shell.",
+                        copilot_auth_file_path().display()
+                    );
+                } else {
+                    eprintln!("Successfully logged out");
+                }
+                std::process::exit(0);
+            }
+            Ok(false) => {
+                if env_var_set {
+                    eprintln!(
+                        "{CODEX_GH_COPILOT_TOKEN_ENV_VAR} is still set in the current shell. Unset it to fully log out."
+                    );
+                } else {
+                    eprintln!("Not logged in");
+                }
+                std::process::exit(0);
+            }
+            Err(err) => {
+                eprintln!("Error logging out: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     match logout(&config.codex_home, config.cli_auth_credentials_store_mode) {
         Ok(true) => {

@@ -734,6 +734,11 @@
           "description": "Base URL for the provider's OpenAI-compatible API.",
           "type": "string"
         },
+        "copilot_token_exchange": {
+          "default": false,
+          "description": "Whether this provider exchanges a GitHub OAuth token for a short-lived Copilot session token before each request.",
+          "type": "boolean"
+        },
         "env_http_headers": {
           "additionalProperties": {
             "type": "string"

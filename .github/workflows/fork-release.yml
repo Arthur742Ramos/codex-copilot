@@ -1,6 +1,9 @@
 name: fork-release
 
 on:
+  push:
+    tags:
+      - "copilot-v*"
   workflow_dispatch:
     inputs:
       version:
@@ -26,13 +29,14 @@ on:
         type: boolean
 
 concurrency:
-  group: fork-release-${{ inputs.version }}
+  group: fork-release-${{ github.event.inputs.version || github.ref_name || github.sha }}
   cancel-in-progress: false
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
+      make_latest: ${{ steps.meta.outputs.make_latest }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
       release_name: ${{ steps.meta.outputs.release_name }}
       version: ${{ steps.meta.outputs.version }}
@@ -44,13 +48,34 @@ jobs:
         run: |
           set -euo pipefail
 
-          version="${{ inputs.version }}"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+            if [[ ! "$release_tag" =~ ^copilot-v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+              echo "tag must look like copilot-v0.1.0 or copilot-v0.1.0-beta.1" >&2
+              exit 1
+            fi
+            version="${release_tag#copilot-v}"
+            make_latest="true"
+          else
+            version="${{ inputs.version }}"
+            if [[ -z "$version" ]]; then
+              echo "version is required for workflow_dispatch" >&2
+              exit 1
+            fi
+            release_tag="copilot-v${version}"
+            make_latest="${{ inputs.make_latest }}"
+            if [[ -z "$make_latest" ]]; then
+              make_latest="true"
+            fi
+          fi
+
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
             echo "version must look like 0.1.0 or 0.1.0-beta.1" >&2
             exit 1
           fi
 
-          echo "release_tag=copilot-v${version}" >> "$GITHUB_OUTPUT"
+          echo "make_latest=${make_latest}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
           echo "release_name=codex-copilot ${version}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
@@ -60,7 +85,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          case "${{ inputs.target }}" in
+          target="${{ inputs.target }}"
+          if [[ -z "$target" ]]; then
+            target="all"
+          fi
+
+          case "$target" in
             aarch64-apple-darwin)
               json='[{"runner":"macos-14","target":"aarch64-apple-darwin","ext":""}]'
               ;;
@@ -86,7 +116,7 @@ jobs:
               ]'
               ;;
             *)
-              echo "unsupported target: ${{ inputs.target }}" >&2
+              echo "unsupported target: ${target}" >&2
               exit 1
               ;;
           esac
@@ -193,7 +223,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: scripts/install-copilot-release.sh
+          sparse-checkout: |
+            scripts/install-copilot-release.sh
+            scripts/install-copilot-release.ps1
           sparse-checkout-cone-mode: false
 
       - uses: actions/download-artifact@v4
@@ -202,9 +234,11 @@ jobs:
           pattern: release-*
           merge-multiple: true
 
-      - name: Stage install script
+      - name: Stage install scripts
         shell: bash
-        run: cp scripts/install-copilot-release.sh dist/install.sh
+        run: |
+          cp scripts/install-copilot-release.sh dist/install.sh
+          cp scripts/install-copilot-release.ps1 dist/install.ps1
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -213,15 +247,23 @@ jobs:
           name: ${{ needs.prepare.outputs.release_name }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          make_latest: ${{ inputs.make_latest && 'true' || 'false' }}
+          make_latest: ${{ needs.prepare.outputs.make_latest }}
           files: dist/*
           body: |
             ## Install
 
-            **macOS / Linux (requires [GitHub CLI](https://cli.github.com/)):**
+            **macOS / Linux**
             ```bash
-            gh release download ${{ needs.prepare.outputs.release_tag }} \
-              --repo ${{ github.repository }} -p install.sh -D /tmp && bash /tmp/install.sh
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ needs.prepare.outputs.release_tag }}/install.sh | bash -s -- ${{ needs.prepare.outputs.release_tag }}
             ```
 
-            Or download the binary for your platform from the assets below and extract it manually.
+            **Windows PowerShell (x64)**
+            ```powershell
+            $tmp = Join-Path $env:TEMP "install-codex-copilot.ps1"
+            irm https://github.com/${{ github.repository }}/releases/download/${{ needs.prepare.outputs.release_tag }}/install.ps1 -OutFile $tmp
+            & $tmp ${{ needs.prepare.outputs.release_tag }}
+            ```
+
+            The installers download the matching release asset directly and put `codex`
+            on your `PATH`. If you prefer, you can also download the platform archive
+            from the assets below and extract it manually.

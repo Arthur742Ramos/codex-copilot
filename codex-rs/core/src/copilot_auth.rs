@@ -4,9 +4,14 @@ use crate::error::EnvVarError;
 use crate::error::UnexpectedResponseError;
 use reqwest::blocking::Client;
 use serde::Deserialize;
-use std::collections::HashMap;
+use serde::Serialize;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::IsTerminal;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -14,13 +19,16 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 const COPILOT_TOKEN_ENDPOINT: &str = "https://api.github.com/copilot_internal/v2/token";
+const GITHUB_DEVICE_CODE_ENDPOINT: &str = "https://github.com/login/device/code";
+const GITHUB_DEVICE_ACCESS_TOKEN_ENDPOINT: &str = "https://github.com/login/oauth/access_token";
+const GITHUB_DEVICE_VERIFICATION_URI: &str = "https://github.com/login/device";
+const GITHUB_COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
 const COPILOT_EDITOR_VERSION: &str = "vscode/1.96.0";
 const COPILOT_EDITOR_PLUGIN_VERSION: &str = "copilot-chat/0.26.7";
 const COPILOT_USER_AGENT: &str = "GitHubCopilotChat/0.26.7";
 const COPILOT_API_VERSION: &str = "2025-04-01";
 const COPILOT_TOKEN_REFRESH_SKEW_SECS: i64 = 120;
-const CODEX_GH_COPILOT_TOKEN_ENV_VAR: &str = "CODEX_GH_COPILOT_TOKEN";
-const GH_COPILOT_TOKEN_ENV_VAR: &str = "GH_COPILOT_TOKEN";
+pub const CODEX_GH_COPILOT_TOKEN_ENV_VAR: &str = "CODEX_GH_COPILOT_TOKEN";
 
 static COPILOT_TOKEN_CACHE: OnceLock<Mutex<Option<CachedCopilotToken>>> = OnceLock::new();
 
@@ -37,8 +45,77 @@ struct CopilotTokenResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct HostEntry {
-    oauth_token: String,
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: Option<String>,
+    interval: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceAccessTokenResponse {
+    access_token: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct SavedGithubToken {
+    github_token: String,
+}
+
+enum GithubTokenSource {
+    EnvVar(String),
+    DeviceCache(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopilotAuthSource {
+    EnvVar,
+    DeviceCache,
+}
+
+impl GithubTokenSource {
+    fn source(&self) -> CopilotAuthSource {
+        match self {
+            Self::EnvVar(_) => CopilotAuthSource::EnvVar,
+            Self::DeviceCache(_) => CopilotAuthSource::DeviceCache,
+        }
+    }
+}
+
+pub fn copilot_auth_source() -> Option<CopilotAuthSource> {
+    discover_github_token()
+        .as_ref()
+        .map(GithubTokenSource::source)
+}
+
+pub fn ensure_copilot_auth() -> crate::error::Result<CopilotAuthSource> {
+    let source = copilot_auth_source().unwrap_or(CopilotAuthSource::DeviceCache);
+    let _ = get_copilot_token()?;
+    Ok(source)
+}
+
+pub fn run_copilot_device_flow() -> crate::error::Result<()> {
+    run_device_flow().map(|_| ())
+}
+
+pub fn copilot_auth_file_path() -> PathBuf {
+    codex_config_dir().join("token.json")
+}
+
+pub fn clear_copilot_auth() -> io::Result<bool> {
+    let path = copilot_auth_file_path();
+    let existed = path.exists();
+    if existed {
+        std::fs::remove_file(path)?;
+    }
+
+    if let Some(cache) = COPILOT_TOKEN_CACHE.get() {
+        let mut guard = cache.lock().expect("copilot token cache poisoned");
+        *guard = None;
+    }
+
+    Ok(existed)
 }
 
 pub(crate) fn get_copilot_token() -> crate::error::Result<String> {
@@ -52,8 +129,31 @@ pub(crate) fn get_copilot_token() -> crate::error::Result<String> {
         return Ok(cached.token.clone());
     }
 
-    let github_token = discover_github_token().ok_or_else(missing_token_error)?;
-    let exchanged = exchange_github_token(&github_token)?;
+    let (github_token, from_device_cache) = match discover_github_token() {
+        Some(GithubTokenSource::EnvVar(github_token)) => (github_token, false),
+        Some(GithubTokenSource::DeviceCache(github_token)) => (github_token, true),
+        None => {
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                return Err(missing_token_error());
+            }
+            (run_device_flow()?, false)
+        }
+    };
+
+    let exchanged = match exchange_github_token(&github_token) {
+        Ok(exchanged) => exchanged,
+        Err(CodexErr::UnexpectedStatus(err))
+            if err.status == reqwest::StatusCode::UNAUTHORIZED && from_device_cache =>
+        {
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                return Err(missing_token_error());
+            }
+            let github_token = run_device_flow()?;
+            exchange_github_token(&github_token)?
+        }
+        Err(err) => return Err(err),
+    };
+
     let token = exchanged.token.clone();
     *guard = Some(CachedCopilotToken {
         token: exchanged.token,
@@ -62,95 +162,152 @@ pub(crate) fn get_copilot_token() -> crate::error::Result<String> {
     Ok(token)
 }
 
-fn discover_github_token() -> Option<String> {
-    for env_var in [CODEX_GH_COPILOT_TOKEN_ENV_VAR, GH_COPILOT_TOKEN_ENV_VAR] {
-        if let Ok(token) = std::env::var(env_var)
-            && !token.trim().is_empty()
-        {
-            return Some(token);
-        }
+fn discover_github_token() -> Option<GithubTokenSource> {
+    if let Ok(token) = std::env::var(CODEX_GH_COPILOT_TOKEN_ENV_VAR)
+        && !token.trim().is_empty()
+    {
+        return Some(GithubTokenSource::EnvVar(token));
     }
 
-    read_token_from_config("hosts.json")
-        .or_else(|| read_token_from_config("apps.json"))
-        .or_else(read_token_from_device_flow_cache)
-        .or_else(read_token_from_gh_cli)
+    read_token_from_device_flow_cache().map(GithubTokenSource::DeviceCache)
 }
 
-fn read_token_from_config(filename: &str) -> Option<String> {
-    for config_dir in copilot_config_dirs() {
-        let path = config_dir.join(filename);
-        let content = match std::fs::read_to_string(path) {
-            Ok(content) => content,
-            Err(_) => continue,
-        };
-        let hosts = match serde_json::from_str::<HashMap<String, HostEntry>>(&content) {
-            Ok(hosts) => hosts,
-            Err(_) => continue,
-        };
-        let Some(entry) = hosts.get("github.com") else {
-            continue;
-        };
-        if !entry.oauth_token.trim().is_empty() {
-            return Some(entry.oauth_token.clone());
-        }
-    }
-
-    None
-}
-
-fn copilot_config_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    let xdg_config = std::env::var("XDG_CONFIG_HOME")
+fn codex_config_dir() -> PathBuf {
+    std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("~"))
                 .join(".config")
-        });
-    dirs.push(xdg_config.join("github-copilot"));
-
-    #[cfg(target_os = "macos")]
-    if let Some(home) = dirs::home_dir() {
-        dirs.push(
-            home.join("Library")
-                .join("Application Support")
-                .join("github-copilot"),
-        );
-    }
-
-    dirs
+        })
+        .join("codex-copilot")
 }
 
-/// Read a GitHub token cached by the Copilot proxy device flow
+/// Read a GitHub token cached by the Copilot device flow
 /// (`~/.config/codex-copilot/token.json`).
 fn read_token_from_device_flow_cache() -> Option<String> {
-    let xdg_config = std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("~"))
-                .join(".config")
-        });
-    let path = xdg_config.join("codex-copilot").join("token.json");
+    let path = copilot_auth_file_path();
     let content = std::fs::read_to_string(path).ok()?;
-    let data: HashMap<String, String> = serde_json::from_str(&content).ok()?;
-    let token = data.get("github_token")?;
-    if token.trim().is_empty() {
+    let data: SavedGithubToken = serde_json::from_str(&content).ok()?;
+    if data.github_token.trim().is_empty() {
         None
     } else {
-        Some(token.clone())
+        Some(data.github_token)
     }
 }
 
-fn read_token_from_gh_cli() -> Option<String> {
-    let output = Command::new("gh").args(["auth", "token"]).output().ok()?;
-    if !output.status.success() {
-        return None;
+fn run_device_flow() -> crate::error::Result<String> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::block_in_place(run_device_flow_inner)
+    } else {
+        run_device_flow_inner()
+    }
+}
+
+fn run_device_flow_inner() -> crate::error::Result<String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(connection_failed)?;
+    let response = client
+        .post(GITHUB_DEVICE_CODE_ENDPOINT)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&serde_json::json!({
+            "client_id": GITHUB_COPILOT_CLIENT_ID,
+            "scope": "read:user",
+        }))
+        .send()
+        .map_err(connection_failed)?;
+    let status = response.status();
+    let body = response.text().map_err(connection_failed)?;
+    if !status.is_success() {
+        return Err(CodexErr::InvalidRequest(format!(
+            "GitHub device code request failed with status {status}: {body}"
+        )));
     }
 
-    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if token.is_empty() { None } else { Some(token) }
+    let device_code: DeviceCodeResponse = serde_json::from_str(&body)?;
+    let verification_uri = device_code
+        .verification_uri
+        .as_deref()
+        .unwrap_or(GITHUB_DEVICE_VERIFICATION_URI);
+    write_device_flow_instructions(verification_uri, &device_code.user_code)?;
+
+    let mut interval = device_code.interval.unwrap_or(5) + 1;
+    loop {
+        std::thread::sleep(Duration::from_secs(interval));
+        let response = client
+            .post(GITHUB_DEVICE_ACCESS_TOKEN_ENDPOINT)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .json(&serde_json::json!({
+                "client_id": GITHUB_COPILOT_CLIENT_ID,
+                "device_code": &device_code.device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            }))
+            .send()
+            .map_err(connection_failed)?;
+        let status = response.status();
+        let body = response.text().map_err(connection_failed)?;
+        if !status.is_success() {
+            return Err(CodexErr::InvalidRequest(format!(
+                "GitHub device access-token request failed with status {status}: {body}"
+            )));
+        }
+
+        let token_data: DeviceAccessTokenResponse = serde_json::from_str(&body)?;
+        if let Some(access_token) = token_data.access_token {
+            let path = copilot_auth_file_path();
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            let mut options = OpenOptions::new();
+            options.truncate(true).write(true).create(true);
+            #[cfg(unix)]
+            {
+                options.mode(0o600);
+            }
+            let mut file = options.open(&path)?;
+            file.write_all(
+                serde_json::to_string(&SavedGithubToken {
+                    github_token: access_token.clone(),
+                })?
+                .as_bytes(),
+            )?;
+            file.flush()?;
+            file.sync_all()?;
+            return Ok(access_token);
+        }
+
+        match token_data.error.as_deref() {
+            Some("authorization_pending") => continue,
+            Some("slow_down") => {
+                interval += 5;
+            }
+            Some("expired_token") => {
+                return Err(CodexErr::InvalidRequest(
+                    "GitHub device code expired before authorization completed".to_string(),
+                ));
+            }
+            Some("access_denied") => {
+                return Err(CodexErr::InvalidRequest(
+                    "GitHub device login was denied".to_string(),
+                ));
+            }
+            Some(other) => {
+                return Err(CodexErr::InvalidRequest(format!(
+                    "GitHub device login failed with error: {other}"
+                )));
+            }
+            None => {
+                return Err(CodexErr::InvalidRequest(
+                    "GitHub device login returned neither an access token nor an error".to_string(),
+                ));
+            }
+        }
+    }
 }
 
 fn exchange_github_token(github_token: &str) -> crate::error::Result<CopilotTokenResponse> {
@@ -214,11 +371,23 @@ fn connection_failed(source: reqwest::Error) -> CodexErr {
     CodexErr::ConnectionFailed(ConnectionFailedError { source })
 }
 
+fn write_device_flow_instructions(verification_uri: &str, user_code: &str) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(
+        format!(
+            "\nGitHub Copilot login required.\nOpen this URL in your browser:\n  {verification_uri}\nEnter this one-time code:\n  {user_code}\n\n"
+        )
+        .as_bytes(),
+    )?;
+    stdout.flush()
+}
+
 fn missing_token_error() -> CodexErr {
     CodexErr::EnvVar(EnvVarError {
         var: CODEX_GH_COPILOT_TOKEN_ENV_VAR.to_string(),
         instructions: Some(
-            "Set CODEX_GH_COPILOT_TOKEN (or the legacy GH_COPILOT_TOKEN), sign into GitHub Copilot in VS Code/JetBrains so hosts.json exists, or run `gh auth login`.".to_string(),
+            "Set CODEX_GH_COPILOT_TOKEN or run Codex from an interactive terminal so it can complete device login."
+                .to_string(),
         ),
     })
 }
@@ -245,64 +414,38 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_codex_env_var_takes_priority_over_legacy_env_var() {
+    fn test_codex_env_var_takes_priority() {
         unsafe {
             std::env::set_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR, "gho_codex_token_123");
-            std::env::set_var(GH_COPILOT_TOKEN_ENV_VAR, "gho_legacy_token_123");
             std::env::remove_var("XDG_CONFIG_HOME");
         }
-        assert_eq!(
+        assert!(matches!(
             discover_github_token(),
-            Some("gho_codex_token_123".to_string())
-        );
+            Some(GithubTokenSource::EnvVar(token)) if token == "gho_codex_token_123"
+        ));
         unsafe {
             std::env::remove_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR);
-            std::env::remove_var(GH_COPILOT_TOKEN_ENV_VAR);
         }
     }
 
     #[test]
     #[serial]
-    fn test_legacy_env_var_is_still_supported() {
-        unsafe {
-            std::env::remove_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR);
-            std::env::set_var(GH_COPILOT_TOKEN_ENV_VAR, "gho_legacy_token_123");
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
-        assert_eq!(
-            discover_github_token(),
-            Some("gho_legacy_token_123".to_string())
-        );
-        unsafe {
-            std::env::remove_var(GH_COPILOT_TOKEN_ENV_VAR);
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn test_parse_hosts_json() {
+    fn test_device_flow_cache_is_used_when_env_var_is_missing() {
         let tmp = TempDir::new().unwrap();
-        let copilot_dir = tmp.path().join("github-copilot");
-        std::fs::create_dir_all(&copilot_dir).unwrap();
-        let mut file = std::fs::File::create(copilot_dir.join("hosts.json")).unwrap();
-        file.write_all(
-            br#"{
-                "github.com": {
-                    "oauth_token": "gho_from_hosts_json"
-                }
-            }"#,
-        )
-        .unwrap();
+        let codex_dir = tmp.path().join("codex-copilot");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let mut file = std::fs::File::create(codex_dir.join("token.json")).unwrap();
+        file.write_all(br#"{"github_token":"gho_device_flow_token_123"}"#)
+            .unwrap();
 
         unsafe {
             std::env::remove_var(CODEX_GH_COPILOT_TOKEN_ENV_VAR);
-            std::env::remove_var(GH_COPILOT_TOKEN_ENV_VAR);
             std::env::set_var("XDG_CONFIG_HOME", tmp.path());
         }
-        assert_eq!(
-            read_token_from_config("hosts.json"),
-            Some("gho_from_hosts_json".to_string())
-        );
+        assert!(matches!(
+            discover_github_token(),
+            Some(GithubTokenSource::DeviceCache(token)) if token == "gho_device_flow_token_123"
+        ));
         unsafe {
             std::env::remove_var("XDG_CONFIG_HOME");
         }
