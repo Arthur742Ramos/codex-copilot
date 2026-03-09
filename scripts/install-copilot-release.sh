@@ -162,10 +162,10 @@ resolve_target() {
     Linux)
       case "$arch" in
         x86_64|amd64)
-          printf 'x86_64-unknown-linux-gnu\n'
+          printf 'x86_64-unknown-linux-musl\n'
           ;;
         aarch64|arm64)
-          printf 'aarch64-unknown-linux-gnu\n'
+          printf 'aarch64-unknown-linux-musl\n'
           ;;
         *)
           echo "Unsupported Linux architecture: $arch" >&2
@@ -180,6 +180,22 @@ resolve_target() {
   esac
 }
 
+resolve_fallback_target() {
+  local primary_target="$1"
+
+  case "$primary_target" in
+    x86_64-unknown-linux-musl)
+      printf 'x86_64-unknown-linux-gnu\n'
+      ;;
+    aarch64-unknown-linux-musl)
+      printf 'aarch64-unknown-linux-gnu\n'
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
+}
+
 if [ -x "$INSTALL_DIR/codex" ]; then
   install_mode="Updating"
 else
@@ -187,8 +203,9 @@ else
 fi
 
 target="$(resolve_target)"
-asset="codex-${target}.tar.gz"
+fallback_target="$(resolve_fallback_target "$target")"
 resolved_version="$(resolve_version)"
+asset="codex-${target}.tar.gz"
 download_url="$(release_url_for_asset "$asset" "$resolved_version")"
 
 step "$install_mode codex-copilot"
@@ -205,7 +222,19 @@ trap cleanup EXIT INT TERM
 archive_path="$tmp_dir/$asset"
 
 step "Downloading $asset"
-download_file "$download_url" "$archive_path"
+if ! download_file "$download_url" "$archive_path"; then
+  if [ -z "$fallback_target" ]; then
+    echo "Failed to download $asset from $download_url" >&2
+    exit 1
+  fi
+
+  step "Primary asset unavailable, falling back to $fallback_target"
+  target="$fallback_target"
+  asset="codex-${target}.tar.gz"
+  download_url="$(release_url_for_asset "$asset" "$resolved_version")"
+  archive_path="$tmp_dir/$asset"
+  download_file "$download_url" "$archive_path"
+fi
 
 step "Installing to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"

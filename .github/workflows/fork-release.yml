@@ -18,8 +18,8 @@ on:
         options:
           - aarch64-apple-darwin
           - x86_64-apple-darwin
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
           - x86_64-pc-windows-msvc
           - all
       make_latest:
@@ -97,17 +97,17 @@ jobs:
             x86_64-apple-darwin)
               json='[{"runner":"macos-15-intel","target":"x86_64-apple-darwin","ext":""}]'
               ;;
-            x86_64-unknown-linux-gnu)
-              json='[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","ext":""}]'
+            x86_64-unknown-linux-musl)
+              json='[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl","ext":""}]'
               ;;
-            aarch64-unknown-linux-gnu)
-              json='[{"runner":"ubuntu-24.04","target":"aarch64-unknown-linux-gnu","ext":"","cross":true}]'
+            aarch64-unknown-linux-musl)
+              json='[{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","ext":""}]'
               ;;
             x86_64-pc-windows-msvc)
               json='[{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}]'
               ;;
             all)
-              json='[{"runner":"macos-14","target":"aarch64-apple-darwin","ext":""},{"runner":"macos-15-intel","target":"x86_64-apple-darwin","ext":""},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","ext":""},{"runner":"ubuntu-24.04","target":"aarch64-unknown-linux-gnu","ext":"","cross":true},{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}]'
+              json='[{"runner":"macos-14","target":"aarch64-apple-darwin","ext":""},{"runner":"macos-15-intel","target":"x86_64-apple-darwin","ext":""},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl","ext":""},{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","ext":""},{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}]'
               ;;
             *)
               echo "unsupported target: ${target}" >&2
@@ -155,54 +155,97 @@ jobs:
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
 
-      - name: Install cross-compilation toolchain (ARM Linux)
-        if: matrix.cross
+      - name: Install UBSan runtime (musl)
+        if: ${{ contains(matrix.target, 'unknown-linux-musl') }}
         shell: bash
         run: |
           set -euo pipefail
-          sudo dpkg --add-architecture arm64
-          sudo python3 - <<'PY'
-          from pathlib import Path
-
-          amd64_sources = Path("/etc/apt/sources.list.d/ubuntu.sources")
-          text = amd64_sources.read_text()
-          if "Architectures: amd64" not in text:
-              text = text.replace(
-                  "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg",
-                  "Architectures: amd64\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg",
-              )
-              amd64_sources.write_text(text)
-          PY
-          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: noble noble-updates noble-backports
-          Components: main universe restricted multiverse
-          Architectures: arm64
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: noble-security
-          Components: main universe restricted multiverse
-          Architectures: arm64
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          EOF
-          sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross \
-            libcap-dev:arm64 libssl-dev:arm64
-          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
-          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_SYSROOT_DIR=/" >> "$GITHUB_ENV"
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libubsan1
+          fi
 
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           targets: ${{ matrix.target }}
+
+      - if: ${{ contains(matrix.target, 'unknown-linux-musl') }}
+        name: Use hermetic Cargo home (musl)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+          mkdir -p "${cargo_home}/bin"
+          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+          : > "${cargo_home}/config.toml"
+
+      - if: ${{ contains(matrix.target, 'unknown-linux-musl') }}
+        name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - if: ${{ contains(matrix.target, 'unknown-linux-musl') }}
+        name: Install musl build tools
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+
+      - if: ${{ contains(matrix.target, 'unknown-linux-musl') }}
+        name: Configure rustc UBSan wrapper (musl host)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ubsan=""
+          if command -v ldconfig >/dev/null 2>&1; then
+            ubsan="$(ldconfig -p | grep -m1 'libubsan\.so\.1' | sed -E 's/.*=> (.*)$/\1/')"
+          fi
+          wrapper_root="${RUNNER_TEMP:-/tmp}"
+          wrapper="${wrapper_root}/rustc-ubsan-wrapper"
+          cat > "${wrapper}" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ -n "${ubsan}" ]]; then
+            export LD_PRELOAD="${ubsan}\${LD_PRELOAD:+:\${LD_PRELOAD}}"
+          fi
+          exec "\$1" "\${@:2}"
+          EOF
+          chmod +x "${wrapper}"
+          echo "RUSTC_WRAPPER=${wrapper}" >> "$GITHUB_ENV"
+          echo "RUSTC_WORKSPACE_WRAPPER=" >> "$GITHUB_ENV"
+
+      - if: ${{ contains(matrix.target, 'unknown-linux-musl') }}
+        name: Clear sanitizer flags (musl)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          target_no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${{ matrix.target }}"
+          target_no_jitter="${target_no_jitter//-/_}"
+          echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
+
+          echo "RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_ENCODED_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "RUSTDOCFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS=" >> "$GITHUB_ENV"
+
+          sanitize_flags() {
+            local input="$1"
+            input="${input//-fsanitize=undefined/}"
+            input="${input//-fno-sanitize-recover=undefined/}"
+            input="${input//-fno-sanitize-trap=undefined/}"
+            echo "$input"
+          }
+
+          cflags="$(sanitize_flags "${CFLAGS-}")"
+          cxxflags="$(sanitize_flags "${CXXFLAGS-}")"
+          echo "CFLAGS=${cflags}" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=${cxxflags}" >> "$GITHUB_ENV"
 
       - name: Build release binary
         shell: bash

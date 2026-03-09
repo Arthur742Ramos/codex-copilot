@@ -10,7 +10,7 @@ set `model_provider = "copilot"` in `~/.codex-copilot/config.toml`.
 Pre-built binaries are published by GitHub Actions for:
 
 - macOS: Apple Silicon, Intel
-- Linux: x86_64, ARM64
+- Linux: x86_64, ARM64 (`musl` for broader distro compatibility)
 - Windows: x86_64
 
 ### macOS / Linux
@@ -89,7 +89,7 @@ git push origin copilot-v0.2.3
 Manual dispatch also supports single-target builds with `target=<triple>`.
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
-`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
 `x86_64-pc-windows-msvc`, `all` (default).
 
 ## Why this fork works
