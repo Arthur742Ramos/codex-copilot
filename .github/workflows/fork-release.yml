@@ -107,7 +107,7 @@ jobs:
               json='[{"runner":"macos-14","target":"aarch64-apple-darwin","ext":""}]'
               ;;
             x86_64-apple-darwin)
-              json='[{"runner":"macos-15-intel","target":"x86_64-apple-darwin","ext":""}]'
+              json='[{"runner":"macos-15-intel","target":"x86_64-apple-darwin","ext":"","timeout_minutes":90}]'
               ;;
             x86_64-unknown-linux-musl)
               json='[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl","ext":""}]'
@@ -119,7 +119,7 @@ jobs:
               json='[{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}]'
               ;;
             all)
-              json='[{"runner":"macos-14","target":"aarch64-apple-darwin","ext":""},{"runner":"macos-15-intel","target":"x86_64-apple-darwin","ext":""},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl","ext":""},{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","ext":""},{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}]'
+              json='[{"runner":"macos-14","target":"aarch64-apple-darwin","ext":""},{"runner":"macos-15-intel","target":"x86_64-apple-darwin","ext":"","timeout_minutes":90},{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl","ext":""},{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","ext":""},{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","ext":".exe"}]'
               ;;
             *)
               echo "unsupported target: ${target}" >&2
@@ -133,7 +133,7 @@ jobs:
     name: Build - ${{ matrix.target }}
     needs: prepare
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.timeout_minutes || 60 }}
     permissions:
       contents: read
     strategy:
