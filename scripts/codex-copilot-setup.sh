@@ -154,12 +154,13 @@ confirm() {
 }
 
 update_config() {
-  local config_file="$HOME/.codex/config.toml"
+  local codex_home="${CODEX_HOME:-$HOME/.codex-copilot}"
+  local config_file="$codex_home/config.toml"
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    info "[dry-run] Would ensure ~/.codex/config.toml exists"
+    info "[dry-run] Would ensure $config_file exists"
   else
-    mkdir -p "$HOME/.codex"
+    mkdir -p "$codex_home"
     touch "$config_file"
   fi
 
@@ -198,7 +199,7 @@ PY
     fi
   fi
 
-  success "Updated ~/.codex/config.toml"
+  success "Updated $config_file"
 }
 
 print_snippet() {

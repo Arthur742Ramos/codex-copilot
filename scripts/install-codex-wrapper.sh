@@ -29,6 +29,7 @@ set -euo pipefail
 
 INSTALLER_SCRIPT="$INSTALLER_SCRIPT"
 REAL_CODEX="$REAL_CODEX"
+DEFAULT_CODEX_HOME="\${CODEX_HOME:-\$HOME/.codex-copilot}"
 
 if [ ! -x "\$REAL_CODEX" ] && [ -x "\$INSTALLER_SCRIPT" ]; then
     echo "Installed Codex binary not found. Downloading latest release..."
@@ -41,7 +42,7 @@ if [ ! -x "\$REAL_CODEX" ]; then
     exit 1
 fi
 
-exec "\$REAL_CODEX" "\$@"
+exec env CODEX_HOME="\$DEFAULT_CODEX_HOME" "\$REAL_CODEX" "\$@"
 EOF
 
 chmod 755 "$TARGET_PATH"

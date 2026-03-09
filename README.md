@@ -3,7 +3,7 @@
 Use [OpenAI Codex CLI](https://github.com/openai/codex) with your GitHub Copilot subscription — no OpenAI API key needed.
 
 This fork defaults to the built-in `copilot` provider, so you do not need to
-set `model_provider = "copilot"` in `~/.codex/config.toml`.
+set `model_provider = "copilot"` in `~/.codex-copilot/config.toml`.
 
 ## Release install
 
@@ -46,8 +46,13 @@ The installers place the real binary here by default:
 - macOS / Linux: `~/.local/codex-copilot/bin/codex`
 - Windows: `%LOCALAPPDATA%\Programs\codex-copilot\bin\codex.exe`
 
+This fork also keeps its runtime state separate from upstream Codex by default:
+
+- macOS / Linux: `~/.codex-copilot`
+- Windows: `%USERPROFILE%\\.codex-copilot`
+
 If you prefer a small shim in `~/bin/codex`, the wrapper from this repo is
-still available, but it is optional:
+still available, but it is optional and preserves that isolated home:
 
 ```bash
 ./scripts/install-codex-wrapper.sh

@@ -27,6 +27,11 @@ Then run Codex as usual:
 codex
 ```
 
+This fork keeps its Codex state isolated from upstream Codex by default:
+
+- macOS / Linux: `~/.codex-copilot`
+- Windows: `%USERPROFILE%\\.codex-copilot`
+
 ## Install a release build
 
 ### macOS / Linux
@@ -49,7 +54,8 @@ The installers place the real binary on disk and update your `PATH`:
 - Windows: `%LOCALAPPDATA%\Programs\codex-copilot\bin`
 
 If you prefer a small shim in `~/bin/codex`, the wrapper from this repo is
-still available, but it is optional and just launches the installed binary:
+still available, but it is optional and preserves the fork's isolated
+`CODEX_HOME`:
 
 ```bash
 ./scripts/install-codex-wrapper.sh

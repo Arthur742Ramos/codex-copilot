@@ -93,7 +93,7 @@ device login.
 codex --provider copilot --model gpt-4.1 "explain this codebase"
 
 # Or set defaults in your config
-cat >> ~/.codex/config.toml << 'EOF'
+cat >> ~/.codex-copilot/config.toml << 'EOF'
 provider = "copilot"
 model = "gpt-4.1"
 EOF
