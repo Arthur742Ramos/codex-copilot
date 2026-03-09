@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version without prefix, for example 0.1.0
+        description: Release version without prefix, for example 0.37.0
         required: true
         type: string
       target:
@@ -48,10 +48,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          minimum_codex_cli_version="0.37.0"
+
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
             release_tag="${GITHUB_REF_NAME}"
             if [[ ! "$release_tag" =~ ^copilot-v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
-              echo "tag must look like copilot-v0.1.0 or copilot-v0.1.0-beta.1" >&2
+              echo "tag must look like copilot-v0.37.0 or copilot-v0.37.1-beta.1" >&2
               exit 1
             fi
             version="${release_tag#copilot-v}"
@@ -70,7 +72,17 @@ jobs:
           fi
 
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
-            echo "version must look like 0.1.0 or 0.1.0-beta.1" >&2
+            echo "version must look like 0.37.0 or 0.37.1-beta.1" >&2
+            exit 1
+          fi
+
+          base_version="${version%%-*}"
+          if [[ "$(printf '%s\n%s\n' "$minimum_codex_cli_version" "$base_version" | sort -V | head -n 1)" != "$minimum_codex_cli_version" ]]; then
+            echo "fork releases must be >= ${minimum_codex_cli_version} so Codex app-server clients accept the binary" >&2
+            exit 1
+          fi
+          if [[ "$base_version" == "$minimum_codex_cli_version" && "$version" == *-* ]]; then
+            echo "fork releases on the ${minimum_codex_cli_version} base must be stable; ${version} would still compare below ${minimum_codex_cli_version} in Codex client version checks" >&2
             exit 1
           fi
 

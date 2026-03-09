@@ -70,6 +70,10 @@ The built-in binary checks these sources in order:
 If `CODEX_GH_COPILOT_TOKEN` is not set and no saved Codex token exists yet,
 Codex runs device flow itself and saves the result.
 
+Fork releases are published on a Codex CLI-compatible semver line starting at
+`0.37.0`, which keeps Codex app-server clients such as T3 Code from rejecting
+the binary on version checks alone.
+
 ## CI release workflow
 
 The fork release workflow can publish installable binaries for macOS, Linux,
@@ -78,14 +82,14 @@ and Windows directly from GitHub Actions.
 Manual dispatch:
 
 ```bash
-gh workflow run fork-release.yml -f version=0.2.3
+gh workflow run fork-release.yml -f version=0.37.0
 ```
 
 Tag-driven release:
 
 ```bash
-git tag -a copilot-v0.2.3 -m "codex-copilot 0.2.3"
-git push origin copilot-v0.2.3
+git tag -a copilot-v0.37.0 -m "codex-copilot 0.37.0"
+git push origin copilot-v0.37.0
 ```
 
 ## Model availability

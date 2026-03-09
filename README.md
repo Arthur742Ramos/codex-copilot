@@ -22,7 +22,7 @@ curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/latest/downl
 Install a specific release:
 
 ```bash
-curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.2.3/install.sh | bash -s -- copilot-v0.2.3
+curl -fsSL https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.37.0/install.sh | bash -s -- copilot-v0.37.0
 ```
 
 ### Windows PowerShell
@@ -37,8 +37,8 @@ Install a specific release:
 
 ```powershell
 $tmp = Join-Path $env:TEMP "install-codex-copilot.ps1"
-irm https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.2.3/install.ps1 -OutFile $tmp
-& $tmp copilot-v0.2.3
+irm https://github.com/Arthur742Ramos/codex-copilot/releases/download/copilot-v0.37.0/install.ps1 -OutFile $tmp
+& $tmp copilot-v0.37.0
 ```
 
 The installers place the real binary here by default:
@@ -73,17 +73,21 @@ Codex-only token cache.
 That makes the release binary the default experience for this fork. The
 wrapper and proxy flows are fallbacks, not the primary auth path.
 
+Release builds use a Codex CLI-compatible semver line starting at `0.37.0`,
+so Codex app-server clients that enforce a minimum CLI version, such as
+T3 Code, accept the forked binary without extra patching.
+
 ## Trigger a release
 
 The release workflow supports both manual dispatch and pushed tags:
 
 ```bash
 # Manual dispatch
-gh workflow run fork-release.yml -f version=0.2.3
+gh workflow run fork-release.yml -f version=0.37.0
 
 # Or create a release from a tag push
-git tag -a copilot-v0.2.3 -m "codex-copilot 0.2.3"
-git push origin copilot-v0.2.3
+git tag -a copilot-v0.37.0 -m "codex-copilot 0.37.0"
+git push origin copilot-v0.37.0
 ```
 
 Manual dispatch also supports single-target builds with `target=<triple>`.
